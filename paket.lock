@@ -1,0 +1,7 @@
+STORAGE: NONE
+NUGET
+  remote: https://api.nuget.org/v3/index.json
+    FSharp.Core (11.0.100)
+    System.CodeDom (10.0.12) - restriction: >= netstandard2.0
+    System.Management (10.0.12)
+      System.CodeDom (>= 10.0.12) - restriction: >= netstandard2.0

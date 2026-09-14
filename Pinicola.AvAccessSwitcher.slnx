@@ -1,5 +1,10 @@
 <Solution>
   <Folder Name="/.solution/">
+    <File Path=".editorconfig" />
+    <File Path=".gitignore" />
+    <File Path="dotnet-tools.json" />
+    <File Path="paket.dependencies" />
+    <File Path="paket.lock" />
     <File Path="README.md" />
   </Folder>
   <Project Path="Pinicola.AvAccessSwitcher/Pinicola.AvAccessSwitcher.fsproj" />

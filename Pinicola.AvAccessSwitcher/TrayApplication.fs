@@ -162,7 +162,7 @@ type TrayApplicationContext() as this =
                                         3000,
                                         "AV Access KVM Switched Away",
                                         msg,
-                                        ToolTipIcon.Warning
+                                        ToolTipIcon.Info
                                     )
                                 )
                             else if state.AutoExtendOnReconnect then

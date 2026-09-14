@@ -2,9 +2,11 @@ namespace Pinicola.AvAccessSwitcher
 
 open System
 open System.Drawing
+open System.IO
 open System.Reflection
 open System.Threading
 open System.Windows.Forms
+open Microsoft.Toolkit.Uwp.Notifications
 open Serilog
 
 type AppState = {
@@ -53,6 +55,21 @@ type TrayApplicationContext() as this =
     let exitMenuItem = new ToolStripMenuItem("Exit")
 
     let checkTimer = new Timer()
+
+    // Helper: Display rich Windows Toast Notifications with custom logo icon in corner
+    let showToast (title: string) (message: string) =
+        try
+            let iconPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "icon.png")
+            let builder = ToastContentBuilder().AddText(title).AddText(message)
+
+            if File.Exists(iconPath) then
+                let iconUri = Uri(iconPath)
+                builder.AddAppLogoOverride(iconUri, ToastGenericAppLogoCrop.None) |> ignore
+
+            builder.Show()
+        with ex ->
+            Log.Error(ex, "Failed to show Windows Toast notification. Falling back to BalloonTip.")
+            notifyIcon.ShowBalloonTip(3000, title, message, ToolTipIcon.None)
 
     // Helper: Safely post UI updates to the WinForms SynchronizationContext
     let postToUi (action: unit -> unit) =
@@ -115,12 +132,7 @@ type TrayApplicationContext() as this =
 
                         postToUi (fun () ->
                             if success then
-                                notifyIcon.ShowBalloonTip(
-                                    2000,
-                                    "Display Switcher",
-                                    "Manually set display to Show only on 1.",
-                                    ToolTipIcon.None
-                                )
+                                showToast "Display Switcher" "Manually set display to Show only on 1."
                         )
 
                         return! loop state
@@ -131,12 +143,7 @@ type TrayApplicationContext() as this =
 
                         postToUi (fun () ->
                             if success then
-                                notifyIcon.ShowBalloonTip(
-                                    2000,
-                                    "Display Switcher",
-                                    "Manually set display to Extend displays.",
-                                    ToolTipIcon.None
-                                )
+                                showToast "Display Switcher" "Manually set display to Extend displays."
                         )
 
                         return! loop state
@@ -151,19 +158,13 @@ type TrayApplicationContext() as this =
                             postToUi (fun () ->
                                 updateUiControls isConnected
 
-                                if userTriggered then
-                                    let statusMsg =
-                                        if isConnected then
-                                            "KVM is ACTIVE on this PC."
-                                        else
-                                            "KVM is SWITCHED AWAY."
+                                let statusMsg =
+                                    if isConnected then
+                                        "Started monitoring KVM (Display is ACTIVE on this PC)."
+                                    else
+                                        "Started monitoring KVM (Display is SWITCHED AWAY)."
 
-                                    notifyIcon.ShowBalloonTip(
-                                        2000,
-                                        "AV Access Switcher Status",
-                                        statusMsg,
-                                        ToolTipIcon.None
-                                    )
+                                showToast "AV Access Switcher Started" statusMsg
                             )
 
                             return! loop { state with LastKvmState = Some isConnected }
@@ -191,12 +192,7 @@ type TrayApplicationContext() as this =
                                         else
                                             "KVM switched to other PC. (Failed to set topology)."
 
-                                    notifyIcon.ShowBalloonTip(
-                                        3000,
-                                        "AV Access KVM Switched Away",
-                                        msg,
-                                        ToolTipIcon.None
-                                    )
+                                    showToast "AV Access KVM Switched Away" msg
                                 )
                             else if state.AutoExtendOnReconnect then
                                 let applied = NativeDisplay.setTopology NativeDisplay.DisplayTopology.Extend
@@ -208,21 +204,11 @@ type TrayApplicationContext() as this =
                                         else
                                             "KVM reconnected. (Failed to set topology)."
 
-                                    notifyIcon.ShowBalloonTip(
-                                        3000,
-                                        "AV Access KVM Reconnected",
-                                        msg,
-                                        ToolTipIcon.None
-                                    )
+                                    showToast "AV Access KVM Reconnected" msg
                                 )
                             else
                                 postToUi (fun () ->
-                                    notifyIcon.ShowBalloonTip(
-                                        3000,
-                                        "AV Access KVM Reconnected",
-                                        "KVM is back online on this PC.",
-                                        ToolTipIcon.None
-                                    )
+                                    showToast "AV Access KVM Reconnected" "KVM is back online on this PC."
                                 )
 
                             return! loop { state with LastKvmState = Some isConnected }

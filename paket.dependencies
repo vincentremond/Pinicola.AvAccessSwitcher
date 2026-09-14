@@ -2,6 +2,7 @@ source https://api.nuget.org/v3/index.json
 
 storage: none
 nuget FSharp.Core
+nuget Microsoft.Toolkit.Uwp.Notifications
 nuget Serilog
 nuget Serilog.Sinks.File
 nuget System.Management

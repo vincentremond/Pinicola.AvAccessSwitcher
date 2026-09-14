@@ -1,8 +1,9 @@
 namespace Pinicola.AvAccessSwitcher
 
 open System
-open System.Runtime.InteropServices
 open System.Diagnostics
+open System.Runtime.InteropServices
+open Serilog
 
 module NativeDisplay =
 
@@ -28,13 +29,19 @@ module NativeDisplay =
     /// Apply display topology directly via Windows SetDisplayConfig API, with DisplaySwitch.exe fallback
     let setTopology (topology: DisplayTopology) : bool =
         try
+            Log.Information("Requesting display topology change to {Topology}...", topology)
             let flags = (uint32 topology) ||| SDC_APPLY
             let result = SetDisplayConfig(0u, IntPtr.Zero, 0u, IntPtr.Zero, flags)
 
             if result = 0 then
+                Log.Information("SetDisplayConfig succeeded for topology {Topology}.", topology)
                 true
             else
-                // Fallback to DisplaySwitch.exe if SetDisplayConfig returned non-zero error
+                Log.Warning(
+                    "SetDisplayConfig returned error code {ErrorCode}. Attempting DisplaySwitch.exe fallback...",
+                    result
+                )
+
                 let arg =
                     match topology with
                     | DisplayTopology.ShowOnlyInternal -> "/internal"
@@ -47,7 +54,8 @@ module NativeDisplay =
                     ProcessStartInfo("DisplaySwitch.exe", arg, UseShellExecute = true, CreateNoWindow = true)
 
                 use p = Process.Start(psi)
+                Log.Information("DisplaySwitch.exe started with argument '{Arg}'.", arg)
                 true
         with ex ->
-            eprintfn "Error setting display topology: %s" ex.Message
+            Log.Error(ex, "Error setting display topology to {Topology}.", topology)
             false

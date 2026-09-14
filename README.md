@@ -36,8 +36,19 @@ However, because Windows believes the monitor is always connected, it continues 
   * **Force: Show Only on 1:** Instant manual switch to Laptop primary screen.
   * **Force: Extend Displays:** Instant manual switch to Extended desktop.
   * **Check Status Now:** Manual status refresh trigger.
-* **Native Windows Toast Notifications:** Alerts you instantly whenever the display topology is changed.
+* **Native Windows Toast Notifications:** Alerts you instantly whenever the display topology is changed, displaying the application icon.
+* **Serilog File Logging:** Logs state transitions, Win32 P/Invoke display topology events, and diagnostics to daily rolling log files.
 * **Native Win32 Display API:** Uses P/Invoke calls to `SetDisplayConfig` (`SDC_TOPOLOGY_INTERNAL` & `SDC_TOPOLOGY_EXTEND`) with a `DisplaySwitch.exe` fallback mechanism.
+
+---
+
+## 📋 Logging & Diagnostics
+
+Logging is powered by **Serilog** (`Serilog.Sinks.File`). Logs are automatically written to daily rolling files at:
+
+```
+%LOCALAPPDATA%\Pinicola.AvAccessSwitcher\logs\switcher-YYYYMMDD.log
+```
 
 ---
 
@@ -48,12 +59,8 @@ However, because Windows believes the monitor is always connected, it continues 
 
 ### Build
 ```powershell
-# Clone the repository
-git clone https://github.com/.../Pinicola.AvAccessSwitcher.git
-cd Pinicola.AvAccessSwitcher
-
-# Build Release binary using the XML solution file
-dotnet build Pinicola.AvAccessSwitcher.slnx -c Release
+# Build Release binary using Paket and MSBuild
+dotnet build -c Release
 ```
 
 ### Run
@@ -71,12 +78,16 @@ Launch the compiled executable:
 Pinicola.AvAccessSwitcher/
 ├── Pinicola.AvAccessSwitcher.slnx              # Solution file (.slnx format)
 ├── README.md                                   # Documentation
+├── paket.dependencies                          # Paket dependency declaration
+├── paket.lock                                  # Paket lock file
 └── Pinicola.AvAccessSwitcher/                  # F# Source code folder
     ├── Pinicola.AvAccessSwitcher.fsproj        # Project file (.NET 10.0-windows)
+    ├── paket.references                         # Project dependencies
+    ├── icon.ico / icon.png                     # Application icon assets
     ├── NativeDisplay.fs                        # SetDisplayConfig P/Invoke & fallback
     ├── KvmDetector.fs                          # Functional AV Access PnP detector
     ├── TrayApplication.fs                      # MailboxProcessor state actor & NotifyIcon UI
-    └── Program.fs                              # WinExe entry point
+    └── Program.fs                              # WinExe entry point & Serilog logger setup
 ```
 
 ---

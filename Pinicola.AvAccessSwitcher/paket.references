@@ -1,2 +1,4 @@
 FSharp.Core
+Serilog
+Serilog.Sinks.File
 System.Management

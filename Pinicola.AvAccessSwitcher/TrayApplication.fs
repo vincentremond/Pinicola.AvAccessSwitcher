@@ -5,6 +5,7 @@ open System.Drawing
 open System.Reflection
 open System.Threading
 open System.Windows.Forms
+open Serilog
 
 type AppState = {
     LastKvmState: bool option
@@ -36,7 +37,8 @@ type TrayApplicationContext() as this =
                     else
                         SystemIcons.Application
                 )
-        with _ ->
+        with ex ->
+            Log.Warning(ex, "Could not load embedded icon.ico resource. Falling back to default system icon.")
             SystemIcons.Application
 
     // System Tray Icon & Context Menu Controls
@@ -97,11 +99,17 @@ type TrayApplicationContext() as this =
                     let! msg = inbox.Receive()
 
                     match msg with
-                    | StopAgent -> return ()
+                    | StopAgent ->
+                        Log.Information("StateAgent received StopAgent signal.")
+                        return ()
 
-                    | SetAutoExtend enabled -> return! loop { state with AutoExtendOnReconnect = enabled }
+                    | SetAutoExtend enabled ->
+                        Log.Information("User toggled AutoExtendOnReconnect to {Enabled}.", enabled)
+                        return! loop { state with AutoExtendOnReconnect = enabled }
 
                     | ForceLaptop ->
+                        Log.Information("User requested manual switch: Force Show Only on 1.")
+
                         let success =
                             NativeDisplay.setTopology NativeDisplay.DisplayTopology.ShowOnlyInternal
 
@@ -118,6 +126,7 @@ type TrayApplicationContext() as this =
                         return! loop state
 
                     | ForceExtend ->
+                        Log.Information("User requested manual switch: Force Extend Displays.")
                         let success = NativeDisplay.setTopology NativeDisplay.DisplayTopology.Extend
 
                         postToUi (fun () ->
@@ -137,6 +146,8 @@ type TrayApplicationContext() as this =
 
                         match state.LastKvmState with
                         | None ->
+                            Log.Information("Initial status check: KVM IsConnected = {IsConnected}.", isConnected)
+
                             postToUi (fun () ->
                                 updateUiControls isConnected
 
@@ -158,6 +169,15 @@ type TrayApplicationContext() as this =
                             return! loop { state with LastKvmState = Some isConnected }
 
                         | Some prevConnected when prevConnected <> isConnected || userTriggered ->
+                            if prevConnected <> isConnected then
+                                Log.Information(
+                                    "KVM State Transition: {PrevState} -> {NewState}.",
+                                    (if prevConnected then "Active" else "SwitchedAway"),
+                                    (if isConnected then "Active" else "SwitchedAway")
+                                )
+                            else
+                                Log.Information("Manual status refresh: IsConnected = {IsConnected}.", isConnected)
+
                             postToUi (fun () -> updateUiControls isConnected)
 
                             if not isConnected then
@@ -252,8 +272,10 @@ type TrayApplicationContext() as this =
         stateAgent.Post(CheckStatus false)
 
     member private this.ExitApp() =
+        Log.Information("Exiting application context...")
         checkTimer.Stop()
         stateAgent.Post(StopAgent)
         notifyIcon.Visible <- false
         notifyIcon.Dispose()
+        Log.CloseAndFlush()
         this.ExitThread()

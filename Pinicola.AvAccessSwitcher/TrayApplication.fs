@@ -1,6 +1,8 @@
 namespace Pinicola.AvAccessSwitcher
 
+open System
 open System.Drawing
+open System.Reflection
 open System.Threading
 open System.Windows.Forms
 
@@ -21,6 +23,22 @@ type TrayApplicationContext() as this =
 
     let syncContext = SynchronizationContext.Current
 
+    // Load embedded custom application icon from assembly resources
+    let appIcon =
+        try
+            let asm = Assembly.GetExecutingAssembly()
+
+            using
+                (asm.GetManifestResourceStream("Pinicola.AvAccessSwitcher.icon.ico"))
+                (fun stream ->
+                    if stream <> null then
+                        new Icon(stream)
+                    else
+                        SystemIcons.Application
+                )
+        with _ ->
+            SystemIcons.Application
+
     // System Tray Icon & Context Menu Controls
     let notifyIcon = new NotifyIcon()
     let contextMenu = new ContextMenuStrip()
@@ -40,28 +58,23 @@ type TrayApplicationContext() as this =
         | null -> action ()
         | ctx -> ctx.Post((fun _ -> action ()), null)
 
-    // Helper: Dynamic status icon generator (Monitor with colored status dot)
+    // Dynamic status icon generator overlaying status badge onto custom app icon
     let createStatusIcon (isActive: bool) : Icon =
-        let bitmap = new Bitmap(32, 32)
+        try
+            let bitmap = new Bitmap(appIcon.ToBitmap(), 32, 32)
 
-        using
-            (Graphics.FromImage(bitmap))
-            (fun g ->
-                g.Clear(Color.Transparent)
+            using
+                (Graphics.FromImage(bitmap))
+                (fun g ->
+                    g.SmoothingMode <- System.Drawing.Drawing2D.SmoothingMode.AntiAlias
+                    let statusColor = if isActive then Color.LimeGreen else Color.Orange
+                    using (new SolidBrush(statusColor)) (fun brush -> g.FillEllipse(brush, 18, 18, 12, 12))
+                    using (new Pen(Color.White, 1.5f)) (fun pen -> g.DrawEllipse(pen, 18, 18, 12, 12))
+                )
 
-                using
-                    (new Pen(Color.White, 2.0f))
-                    (fun pen ->
-                        g.DrawRectangle(pen, 4, 4, 24, 16)
-                        g.DrawLine(pen, 16, 20, 16, 26)
-                        g.DrawLine(pen, 10, 26, 22, 26)
-                    )
-
-                let statusColor = if isActive then Color.LimeGreen else Color.Orange
-                using (new SolidBrush(statusColor)) (fun brush -> g.FillEllipse(brush, 18, 10, 8, 8))
-            )
-
-        Icon.FromHandle(bitmap.GetHicon())
+            Icon.FromHandle(bitmap.GetHicon())
+        with _ ->
+            appIcon
 
     let updateUiControls (isConnected: bool) =
         if isConnected then
@@ -98,7 +111,7 @@ type TrayApplicationContext() as this =
                                     2000,
                                     "Display Switcher",
                                     "Manually set display to Show only on 1.",
-                                    ToolTipIcon.Info
+                                    ToolTipIcon.None
                                 )
                         )
 
@@ -113,7 +126,7 @@ type TrayApplicationContext() as this =
                                     2000,
                                     "Display Switcher",
                                     "Manually set display to Extend displays.",
-                                    ToolTipIcon.Info
+                                    ToolTipIcon.None
                                 )
                         )
 
@@ -138,7 +151,7 @@ type TrayApplicationContext() as this =
                                         2000,
                                         "AV Access Switcher Status",
                                         statusMsg,
-                                        ToolTipIcon.Info
+                                        ToolTipIcon.None
                                     )
                             )
 
@@ -162,7 +175,7 @@ type TrayApplicationContext() as this =
                                         3000,
                                         "AV Access KVM Switched Away",
                                         msg,
-                                        ToolTipIcon.Info
+                                        ToolTipIcon.None
                                     )
                                 )
                             else if state.AutoExtendOnReconnect then
@@ -179,7 +192,7 @@ type TrayApplicationContext() as this =
                                         3000,
                                         "AV Access KVM Reconnected",
                                         msg,
-                                        ToolTipIcon.Info
+                                        ToolTipIcon.None
                                     )
                                 )
                             else
@@ -188,7 +201,7 @@ type TrayApplicationContext() as this =
                                         3000,
                                         "AV Access KVM Reconnected",
                                         "KVM is back online on this PC.",
-                                        ToolTipIcon.Info
+                                        ToolTipIcon.None
                                     )
                                 )
 
@@ -229,7 +242,7 @@ type TrayApplicationContext() as this =
 
         notifyIcon.ContextMenuStrip <- contextMenu
         notifyIcon.Text <- "Pinicola AV Access Switcher"
-        notifyIcon.Icon <- SystemIcons.Application
+        notifyIcon.Icon <- appIcon
         notifyIcon.Visible <- true
 
         checkTimer.Interval <- 2000

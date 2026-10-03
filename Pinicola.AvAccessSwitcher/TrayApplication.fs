@@ -86,7 +86,7 @@ type TrayApplicationContext() as this =
                 (Graphics.FromImage(bitmap))
                 (fun g ->
                     g.SmoothingMode <- System.Drawing.Drawing2D.SmoothingMode.AntiAlias
-                    let statusColor = if isActive then Color.LimeGreen else Color.Orange
+                    let statusColor = if isActive then Color.LimeGreen else Color.Gray
                     using (new SolidBrush(statusColor)) (fun brush -> g.FillEllipse(brush, 18, 18, 12, 12))
                     using (new Pen(Color.White, 1.5f)) (fun pen -> g.DrawEllipse(pen, 18, 18, 12, 12))
                 )

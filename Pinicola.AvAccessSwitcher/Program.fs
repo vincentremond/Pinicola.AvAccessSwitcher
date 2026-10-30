@@ -9,7 +9,82 @@ open Serilog
 
 module Program =
 
-    let [<Literal>] private MutexName = @"Local\Pinicola.AvAccessSwitcher.SingleInstance"
+    [<Literal>]
+    let MutexName = @"Local\Pinicola.AvAccessSwitcher.SingleInstance"
+
+    [<Literal>]
+    let AllowMultipleFlag = "--allow-multiple"
+
+    type StartupOptions = { AllowMultipleInstances: bool }
+
+    type SingleInstanceResult =
+        | Acquired of IDisposable
+        | AlreadyRunning
+        | AcquisitionFailed of exn
+
+    type ProgramDependencies = {
+        AcquireSingleInstance: unit -> SingleInstanceResult
+        NotifyAlreadyRunning: unit -> unit
+        RunApplication: unit -> unit
+    }
+
+    /// Parses command-line arguments into strongly-typed startup options.
+    let parseArgs (argv: string array) : StartupOptions =
+        let allowMultiple =
+            argv
+            |> Array.exists (fun arg -> String.Equals(arg, AllowMultipleFlag, StringComparison.OrdinalIgnoreCase))
+
+        { AllowMultipleInstances = allowMultiple }
+
+    /// Attempts to acquire a named OS mutex for single-instance enforcement.
+    let acquireSingleInstance (mutexName: string) : SingleInstanceResult =
+        try
+            let mutable createdNew = false
+            let mutex = new Mutex(true, mutexName, &createdNew)
+
+            if createdNew then
+                let handle =
+                    { new IDisposable with
+                        member _.Dispose() =
+                            try
+                                mutex.ReleaseMutex()
+                            with _ ->
+                                ()
+
+                            mutex.Dispose()
+                    }
+
+                Acquired handle
+            else
+                mutex.Dispose()
+                AlreadyRunning
+        with ex ->
+            Log.Error(ex, "Failed to create or acquire single-instance mutex.")
+            AcquisitionFailed ex
+
+    /// Executes the startup orchestration flow using injected dependencies.
+    let execute (deps: ProgramDependencies) (argv: string array) : int =
+        let options = parseArgs argv
+
+        if options.AllowMultipleInstances then
+            Log.Information("Allow multiple instances requested via command-line argument.")
+            deps.RunApplication()
+            0
+        else
+            match deps.AcquireSingleInstance() with
+            | AlreadyRunning ->
+                Log.Warning("Another instance of Pinicola.AvAccessSwitcher is already running. Exiting.")
+                deps.NotifyAlreadyRunning()
+                0
+
+            | Acquired instanceLock ->
+                use _ = instanceLock
+                deps.RunApplication()
+                0
+
+            | AcquisitionFailed _ ->
+                deps.RunApplication()
+                0
 
     let private initLogging () =
         let logDir =
@@ -33,6 +108,7 @@ module Program =
     let private notifyAlreadyRunning () =
         try
             let iconPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "icon.png")
+
             let builder =
                 ToastContentBuilder()
                     .AddText("AV Access Switcher")
@@ -46,57 +122,25 @@ module Program =
         with ex ->
             Log.Warning(ex, "Could not show already-running toast notification.")
 
+    let private runWinFormsApplication () =
+        Application.EnableVisualStyles()
+        Application.SetCompatibleTextRenderingDefault(false)
+
+        use context = new TrayApplicationContext()
+        Application.Run(context)
+
+    let private defaultDependencies = {
+        AcquireSingleInstance = fun () -> acquireSingleInstance MutexName
+        NotifyAlreadyRunning = notifyAlreadyRunning
+        RunApplication = runWinFormsApplication
+    }
+
     [<STAThread>]
     [<EntryPoint>]
     let main argv =
         initLogging ()
 
-        let allowMultiple =
-            argv |> Array.exists (fun arg -> String.Equals(arg, "--allow-multiple", StringComparison.OrdinalIgnoreCase))
-
-        if allowMultiple then
-            Log.Information("Allow multiple instances requested via command-line argument.")
-            Application.EnableVisualStyles()
-            Application.SetCompatibleTextRenderingDefault(false)
-
-            use context = new TrayApplicationContext()
-            Application.Run(context)
-            0
-        else
-            let mutable createdNew = false
-            let mutex =
-                try
-                    Some(new Mutex(true, MutexName, &createdNew))
-                with ex ->
-                    Log.Error(ex, "Failed to create or acquire single-instance mutex.")
-                    None
-
-            match mutex with
-            | Some m when not createdNew ->
-                Log.Warning("Another instance of Pinicola.AvAccessSwitcher is already running. Exiting.")
-                notifyAlreadyRunning ()
-                m.Dispose()
-                Log.CloseAndFlush()
-                0
-
-            | Some m ->
-                try
-                    Application.EnableVisualStyles()
-                    Application.SetCompatibleTextRenderingDefault(false)
-
-                    use context = new TrayApplicationContext()
-                    Application.Run(context)
-                    0
-                finally
-                    try
-                        m.ReleaseMutex()
-                    with _ -> ()
-                    m.Dispose()
-
-            | None ->
-                Application.EnableVisualStyles()
-                Application.SetCompatibleTextRenderingDefault(false)
-
-                use context = new TrayApplicationContext()
-                Application.Run(context)
-                0
+        try
+            execute defaultDependencies argv
+        finally
+            Log.CloseAndFlush()

@@ -6,33 +6,55 @@ open Serilog
 
 module KvmDetector =
 
-    /// Checks if the AV Access KVM USB hub / device is currently connected and active on this PC.
-    let isKvmConnected () : bool =
+    type PnpDeviceInfo = {
+        DeviceId: string
+        Name: string
+    }
+
+    [<Literal>]
+    let KvmHardwareIdToken = "VID_1D6B&PID_B022"
+
+    [<Literal>]
+    let KvmNameToken = "AV Access"
+
+    /// Determines whether a PnP device matches the AV Access KVM USB hub/device.
+    let isMatchingDevice (device: PnpDeviceInfo) : bool =
+        (not (isNull device.DeviceId)
+         && device.DeviceId.Contains(KvmHardwareIdToken, StringComparison.OrdinalIgnoreCase))
+        || (not (isNull device.Name)
+            && device.Name.Contains(KvmNameToken, StringComparison.OrdinalIgnoreCase))
+
+    /// Checks if any device returned by the query matches the AV Access KVM device.
+    let isKvmConnectedWith (queryDevices: unit -> PnpDeviceInfo seq) : bool =
         try
+            queryDevices () |> Seq.exists isMatchingDevice
+        with ex ->
+            Log.Error(ex, "Error querying KVM status via WMI.")
+            false
+
+    let private queryWmiDevices () : PnpDeviceInfo seq =
+        seq {
             use searcher =
                 new ManagementObjectSearcher(@"SELECT DeviceID, Status, Name FROM Win32_PnPEntity WHERE Status = 'OK'")
 
             use collection = searcher.Get()
 
-            let connected =
-                collection
-                |> Seq.cast<ManagementObject>
-                |> Seq.exists (fun item ->
-                    let deviceId =
-                        match item.["DeviceID"] with
-                        | :? string as s -> s
-                        | _ -> ""
+            for item in collection |> Seq.cast<ManagementObject> do
+                let deviceId =
+                    match item.["DeviceID"] with
+                    | :? string as s -> s
+                    | _ -> ""
 
-                    let name =
-                        match item.["Name"] with
-                        | :? string as s -> s
-                        | _ -> ""
+                let name =
+                    match item.["Name"] with
+                    | :? string as s -> s
+                    | _ -> ""
 
-                    deviceId.Contains("VID_1D6B&PID_B022", StringComparison.OrdinalIgnoreCase)
-                    || name.Contains("AV Access", StringComparison.OrdinalIgnoreCase)
-                )
+                yield {
+                    DeviceId = deviceId
+                    Name = name
+                }
+        }
 
-            connected
-        with ex ->
-            Log.Error(ex, "Error querying KVM status via WMI.")
-            false
+    /// Checks if the AV Access KVM USB hub / device is currently connected and active on this PC.
+    let isKvmConnected () : bool = isKvmConnectedWith queryWmiDevices

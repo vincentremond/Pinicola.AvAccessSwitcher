@@ -105,7 +105,7 @@ MIT License.
 ## 📋 TODO
 
 - [x] Single instance mode
-- [ ] Add unit tests
+- [x] Add unit tests
 - [ ] Better handler full unplug/replug
 - [ ] Option to prevent sleep
 

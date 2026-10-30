@@ -21,6 +21,104 @@ type AppMsg =
     | ForceExtend
     | StopAgent
 
+type AppDependencies = {
+    IsKvmConnected: unit -> bool
+    SetTopology: NativeDisplay.DisplayTopology -> bool
+    UpdateUi: bool -> unit
+    ShowToast: string -> string -> unit
+}
+
+module TrayStateLogic =
+
+    let initialState = {
+        LastKvmState = None
+        AutoExtendOnReconnect = true
+    }
+
+    let step (deps: AppDependencies) (state: AppState) (msg: AppMsg) : AppState option =
+        match msg with
+        | StopAgent ->
+            Log.Information("StateAgent received StopAgent signal.")
+            None
+
+        | SetAutoExtend enabled ->
+            Log.Information("User toggled AutoExtendOnReconnect to {Enabled}.", enabled)
+            Some { state with AutoExtendOnReconnect = enabled }
+
+        | ForceLaptop ->
+            Log.Information("User requested manual switch: Force Show Only on 1.")
+            let success = deps.SetTopology NativeDisplay.DisplayTopology.ShowOnlyInternal
+
+            if success then
+                deps.ShowToast "Display Switcher" "Manually set display to Show only on 1."
+
+            Some state
+
+        | ForceExtend ->
+            Log.Information("User requested manual switch: Force Extend Displays.")
+            let success = deps.SetTopology NativeDisplay.DisplayTopology.Extend
+
+            if success then
+                deps.ShowToast "Display Switcher" "Manually set display to Extend displays."
+
+            Some state
+
+        | CheckStatus userTriggered ->
+            let isConnected = deps.IsKvmConnected()
+
+            match state.LastKvmState with
+            | None ->
+                Log.Information("Initial status check: KVM IsConnected = {IsConnected}.", isConnected)
+                deps.UpdateUi isConnected
+
+                let statusMsg =
+                    if isConnected then
+                        "Started monitoring KVM (Display is ACTIVE on this PC)."
+                    else
+                        "Started monitoring KVM (Display is SWITCHED AWAY)."
+
+                deps.ShowToast "AV Access Switcher Started" statusMsg
+                Some { state with LastKvmState = Some isConnected }
+
+            | Some prevConnected when prevConnected <> isConnected || userTriggered ->
+                if prevConnected <> isConnected then
+                    Log.Information(
+                        "KVM State Transition: {PrevState} -> {NewState}.",
+                        (if prevConnected then "Active" else "SwitchedAway"),
+                        (if isConnected then "Active" else "SwitchedAway")
+                    )
+                else
+                    Log.Information("Manual status refresh: IsConnected = {IsConnected}.", isConnected)
+
+                deps.UpdateUi isConnected
+
+                if not isConnected then
+                    let applied = deps.SetTopology NativeDisplay.DisplayTopology.ShowOnlyInternal
+
+                    let toastMsg =
+                        if applied then
+                            "KVM switched to other PC. Display set to Show only on 1 (Laptop Screen)."
+                        else
+                            "KVM switched to other PC. (Failed to set topology)."
+
+                    deps.ShowToast "AV Access KVM Switched Away" toastMsg
+                else if state.AutoExtendOnReconnect then
+                    let applied = deps.SetTopology NativeDisplay.DisplayTopology.Extend
+
+                    let toastMsg =
+                        if applied then
+                            "KVM reconnected. Display restored to Extend displays."
+                        else
+                            "KVM reconnected. (Failed to set topology)."
+
+                    deps.ShowToast "AV Access KVM Reconnected" toastMsg
+                else
+                    deps.ShowToast "AV Access KVM Reconnected" "KVM is back online on this PC."
+
+                Some { state with LastKvmState = Some isConnected }
+
+            | Some _ -> Some state
+
 type TrayApplicationContext() as this =
     inherit ApplicationContext()
 
@@ -108,6 +206,13 @@ type TrayApplicationContext() as this =
         with _ ->
             ()
 
+    let appDeps = {
+        IsKvmConnected = KvmDetector.isKvmConnected
+        SetTopology = NativeDisplay.setTopology
+        UpdateUi = fun isConnected -> postToUi (fun () -> updateUiControls isConnected)
+        ShowToast = fun title message -> postToUi (fun () -> showToast title message)
+    }
+
     // Pure functional MailboxProcessor managing state without mutable variables
     let stateAgent =
         MailboxProcessor.Start(fun inbox ->
@@ -115,113 +220,12 @@ type TrayApplicationContext() as this =
                 async {
                     let! msg = inbox.Receive()
 
-                    match msg with
-                    | StopAgent ->
-                        Log.Information("StateAgent received StopAgent signal.")
-                        return ()
-
-                    | SetAutoExtend enabled ->
-                        Log.Information("User toggled AutoExtendOnReconnect to {Enabled}.", enabled)
-                        return! loop { state with AutoExtendOnReconnect = enabled }
-
-                    | ForceLaptop ->
-                        Log.Information("User requested manual switch: Force Show Only on 1.")
-
-                        let success =
-                            NativeDisplay.setTopology NativeDisplay.DisplayTopology.ShowOnlyInternal
-
-                        postToUi (fun () ->
-                            if success then
-                                showToast "Display Switcher" "Manually set display to Show only on 1."
-                        )
-
-                        return! loop state
-
-                    | ForceExtend ->
-                        Log.Information("User requested manual switch: Force Extend Displays.")
-                        let success = NativeDisplay.setTopology NativeDisplay.DisplayTopology.Extend
-
-                        postToUi (fun () ->
-                            if success then
-                                showToast "Display Switcher" "Manually set display to Extend displays."
-                        )
-
-                        return! loop state
-
-                    | CheckStatus userTriggered ->
-                        let isConnected = KvmDetector.isKvmConnected ()
-
-                        match state.LastKvmState with
-                        | None ->
-                            Log.Information("Initial status check: KVM IsConnected = {IsConnected}.", isConnected)
-
-                            postToUi (fun () ->
-                                updateUiControls isConnected
-
-                                let statusMsg =
-                                    if isConnected then
-                                        "Started monitoring KVM (Display is ACTIVE on this PC)."
-                                    else
-                                        "Started monitoring KVM (Display is SWITCHED AWAY)."
-
-                                showToast "AV Access Switcher Started" statusMsg
-                            )
-
-                            return! loop { state with LastKvmState = Some isConnected }
-
-                        | Some prevConnected when prevConnected <> isConnected || userTriggered ->
-                            if prevConnected <> isConnected then
-                                Log.Information(
-                                    "KVM State Transition: {PrevState} -> {NewState}.",
-                                    (if prevConnected then "Active" else "SwitchedAway"),
-                                    (if isConnected then "Active" else "SwitchedAway")
-                                )
-                            else
-                                Log.Information("Manual status refresh: IsConnected = {IsConnected}.", isConnected)
-
-                            postToUi (fun () -> updateUiControls isConnected)
-
-                            if not isConnected then
-                                let applied =
-                                    NativeDisplay.setTopology NativeDisplay.DisplayTopology.ShowOnlyInternal
-
-                                postToUi (fun () ->
-                                    let msg =
-                                        if applied then
-                                            "KVM switched to other PC. Display set to Show only on 1 (Laptop Screen)."
-                                        else
-                                            "KVM switched to other PC. (Failed to set topology)."
-
-                                    showToast "AV Access KVM Switched Away" msg
-                                )
-                            else if state.AutoExtendOnReconnect then
-                                let applied = NativeDisplay.setTopology NativeDisplay.DisplayTopology.Extend
-
-                                postToUi (fun () ->
-                                    let msg =
-                                        if applied then
-                                            "KVM reconnected. Display restored to Extend displays."
-                                        else
-                                            "KVM reconnected. (Failed to set topology)."
-
-                                    showToast "AV Access KVM Reconnected" msg
-                                )
-                            else
-                                postToUi (fun () ->
-                                    showToast "AV Access KVM Reconnected" "KVM is back online on this PC."
-                                )
-
-                            return! loop { state with LastKvmState = Some isConnected }
-
-                        | _ -> return! loop state
+                    match TrayStateLogic.step appDeps state msg with
+                    | None -> return ()
+                    | Some nextState -> return! loop nextState
                 }
 
-            let initialState = {
-                LastKvmState = None
-                AutoExtendOnReconnect = true
-            }
-
-            loop initialState
+            loop TrayStateLogic.initialState
         )
 
     do

@@ -8,4 +8,5 @@
     <File Path="README.md" />
   </Folder>
   <Project Path="Pinicola.AvAccessSwitcher/Pinicola.AvAccessSwitcher.fsproj" />
+  <Project Path="Pinicola.AvAccessSwitcher.Tests/Pinicola.AvAccessSwitcher.Tests.fsproj" />
 </Solution>

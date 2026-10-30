@@ -15,7 +15,7 @@ module NativeDisplay =
         | ShowOnlyExternal = 0x00000008u // SDC_TOPOLOGY_EXTERNAL (Show only on 2)
 
     [<Literal>]
-    let private SDC_APPLY = 0x00000080u
+    let SDC_APPLY = 0x00000080u
 
     [<DllImport("user32.dll", SetLastError = true)>]
     extern int private SetDisplayConfig(
@@ -26,12 +26,28 @@ module NativeDisplay =
         uint32 flags
     )
 
-    /// Apply display topology directly via Windows SetDisplayConfig API, with DisplaySwitch.exe fallback
-    let setTopology (topology: DisplayTopology) : bool =
+    /// Compute the flags passed to SetDisplayConfig for a given topology
+    let toDisplayConfigFlags (topology: DisplayTopology) : uint32 = (uint32 topology) ||| SDC_APPLY
+
+    /// Compute the DisplaySwitch.exe command-line argument for a given topology
+    let toDisplaySwitchArg (topology: DisplayTopology) : string =
+        match topology with
+        | DisplayTopology.ShowOnlyInternal -> "/internal"
+        | DisplayTopology.Extend -> "/extend"
+        | DisplayTopology.Clone -> "/clone"
+        | DisplayTopology.ShowOnlyExternal -> "/external"
+        | _ -> "/extend"
+
+    /// Apply display topology using injected native API and fallback process starter
+    let setTopologyWith
+        (invokeSetDisplayConfig: uint32 -> int)
+        (startDisplaySwitch: string -> unit)
+        (topology: DisplayTopology)
+        : bool =
         try
             Log.Information("Requesting display topology change to {Topology}...", topology)
-            let flags = (uint32 topology) ||| SDC_APPLY
-            let result = SetDisplayConfig(0u, IntPtr.Zero, 0u, IntPtr.Zero, flags)
+            let flags = toDisplayConfigFlags topology
+            let result = invokeSetDisplayConfig flags
 
             if result = 0 then
                 Log.Information("SetDisplayConfig succeeded for topology {Topology}.", topology)
@@ -42,20 +58,24 @@ module NativeDisplay =
                     result
                 )
 
-                let arg =
-                    match topology with
-                    | DisplayTopology.ShowOnlyInternal -> "/internal"
-                    | DisplayTopology.Extend -> "/extend"
-                    | DisplayTopology.Clone -> "/clone"
-                    | DisplayTopology.ShowOnlyExternal -> "/external"
-                    | _ -> "/extend"
-
-                let psi =
-                    ProcessStartInfo("DisplaySwitch.exe", arg, UseShellExecute = true, CreateNoWindow = true)
-
-                use p = Process.Start(psi)
+                let arg = toDisplaySwitchArg topology
+                startDisplaySwitch arg
                 Log.Information("DisplaySwitch.exe started with argument '{Arg}'.", arg)
                 true
         with ex ->
             Log.Error(ex, "Error setting display topology to {Topology}.", topology)
             false
+
+    let private defaultInvokeSetDisplayConfig (flags: uint32) : int =
+        SetDisplayConfig(0u, IntPtr.Zero, 0u, IntPtr.Zero, flags)
+
+    let private defaultStartDisplaySwitch (arg: string) : unit =
+        let psi =
+            ProcessStartInfo("DisplaySwitch.exe", arg, UseShellExecute = true, CreateNoWindow = true)
+
+        use _ = Process.Start(psi)
+        ()
+
+    /// Apply display topology directly via Windows SetDisplayConfig API, with DisplaySwitch.exe fallback
+    let setTopology (topology: DisplayTopology) : bool =
+        setTopologyWith defaultInvokeSetDisplayConfig defaultStartDisplaySwitch topology

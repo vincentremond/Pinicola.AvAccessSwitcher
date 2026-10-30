@@ -19,26 +19,27 @@ However, because Windows believes the monitor is always connected, it continues 
 
 ## 🖥️ Target Hardware
 
-* **Primary Target:** [AV Access iDock C20](https://www.avaccess.com/) (KVM Switch Docking Station for Dual Laptops/PCs)
-* **Compatibility:** Compatible with other **AV Access iDock** models (e.g., iDock C10, iDock B30, etc.) and similar KVM switches using USB PnP switching (`VID_1D6B&PID_B022` / `AV Access iDock`).
+- **Primary Target:** [AV Access iDock C20](https://www.avaccess.com/) (KVM Switch Docking Station for Dual Laptops/PCs)
+- **Compatibility:** Compatible with other **AV Access iDock** models (e.g., iDock C10, iDock B30, etc.) and similar KVM switches using USB PnP switching (`VID_1D6B&PID_B022` / `AV Access iDock`).
 
 ---
 
 ## ✨ Features
 
-* **Pure Functional F#:** Built targeting **.NET 10.0** (`net10.0-windows`) using the `MailboxProcessor` actor model with **zero `mutable` variables**.
-* **Headless System Tray Icon:** Runs in the background without any visible console or GUI window.
-  * 🟢 **Green Status Dot:** KVM Active on this PC (Extended Displays).
-  * 🟠 **Orange Status Dot:** KVM Switched Away (Show Only on 1 / Laptop Screen).
-* **Tray Context Menu Controls:**
-  * **Status Display:** Shows current real-time KVM state.
-  * **Auto-Extend on Switch Back:** `[✓]` Option to automatically restore Extended mode upon reconnecting.
-  * **Force: Show Only on 1:** Instant manual switch to Laptop primary screen.
-  * **Force: Extend Displays:** Instant manual switch to Extended desktop.
-  * **Check Status Now:** Manual status refresh trigger.
-* **Native Windows Toast Notifications:** Alerts you instantly whenever the display topology is changed, displaying the application icon.
-* **Serilog File Logging:** Logs state transitions, Win32 P/Invoke display topology events, and diagnostics to daily rolling log files.
-* **Native Win32 Display API:** Uses P/Invoke calls to `SetDisplayConfig` (`SDC_TOPOLOGY_INTERNAL` & `SDC_TOPOLOGY_EXTEND`) with a `DisplaySwitch.exe` fallback mechanism.
+- **Pure Functional F#:** Built targeting **.NET 10.0** (`net10.0-windows`) using the `MailboxProcessor` actor model with **zero `mutable` variables**.
+- **Headless System Tray Icon:** Runs in the background without any visible console or GUI window.
+  - 🟢 **Green Status Dot:** KVM Active on this PC (Extended Displays).
+  - 🟠 **Orange Status Dot:** KVM Switched Away (Show Only on 1 / Laptop Screen).
+- **Tray Context Menu Controls:**
+  - **Status Display:** Shows current real-time KVM state.
+  - **Auto-Extend on Switch Back:** `[✓]` Option to automatically restore Extended mode upon reconnecting.
+  - **Force: Show Only on 1:** Instant manual switch to Laptop primary screen.
+  - **Force: Extend Displays:** Instant manual switch to Extended desktop.
+  - **Check Status Now:** Manual status refresh trigger.
+- **Native Windows Toast Notifications:** Alerts you instantly whenever the display topology is changed, displaying the application icon.
+- **Single-Instance Enforcement:** Automatically prevents duplicate instances from running simultaneously using a session-scoped Mutex and alerts the user with a notification.
+- **Serilog File Logging:** Logs state transitions, Win32 P/Invoke display topology events, and diagnostics to daily rolling log files.
+- **Native Win32 Display API:** Uses P/Invoke calls to `SetDisplayConfig` (`SDC_TOPOLOGY_INTERNAL` & `SDC_TOPOLOGY_EXTEND`) with a `DisplaySwitch.exe` fallback mechanism.
 
 ---
 
@@ -55,15 +56,18 @@ Logging is powered by **Serilog** (`Serilog.Sinks.File`). Logs are automatically
 ## 🛠️ Building & Running
 
 ### Prerequisites
-* [.NET 10 SDK](https://dotnet.microsoft.com/)
+
+- [.NET 10 SDK](https://dotnet.microsoft.com/)
 
 ### Build
+
 ```powershell
 # Build Release binary using Paket and MSBuild
 dotnet build -c Release
 ```
 
 ### Run
+
 Launch the compiled executable:
 
 ```powershell
@@ -95,3 +99,14 @@ Pinicola.AvAccessSwitcher/
 ## 📄 License
 
 MIT License.
+
+---
+
+## 📋 TODO
+
+- [x] Single instance mode
+- [ ] Add unit tests
+- [ ] Better handler full unplug/replug
+- [ ] Option to prevent sleep
+
+---

@@ -9,8 +9,13 @@ open System.Windows.Forms
 open Microsoft.Toolkit.Uwp.Notifications
 open Serilog
 
+type DockState =
+    | Unplugged
+    | SwitchedAway
+    | Active
+
 type AppState = {
-    LastKvmState: bool option
+    LastDockState: DockState option
     AutoExtendOnReconnect: bool
 }
 
@@ -23,17 +28,31 @@ type AppMsg =
 
 type AppDependencies = {
     IsKvmConnected: unit -> bool
+    IsExternalDisplayConnected: unit -> bool
     SetTopology: NativeDisplay.DisplayTopology -> bool
-    UpdateUi: bool -> unit
+    UpdateUi: DockState -> unit
     ShowToast: string -> string -> unit
 }
 
 module TrayStateLogic =
 
     let initialState = {
-        LastKvmState = None
+        LastDockState = None
         AutoExtendOnReconnect = true
     }
+
+    /// Resolves the current dock state from KVM USB presence and external display availability.
+    let resolveDockState (isKvmConnected: bool) (isExternalDisplayConnected: bool) : DockState =
+        match isExternalDisplayConnected, isKvmConnected with
+        | false, false -> DockState.Unplugged
+        | false, true ->
+            Log.Debug(
+                "KVM USB is connected, but no external display target is available yet. Waiting for display before transitioning to Active."
+            )
+
+            DockState.Unplugged
+        | true, false -> DockState.SwitchedAway
+        | true, true -> DockState.Active
 
     let step (deps: AppDependencies) (state: AppState) (msg: AppMsg) : AppState option =
         match msg with
@@ -64,35 +83,43 @@ module TrayStateLogic =
             Some state
 
         | CheckStatus userTriggered ->
-            let isConnected = deps.IsKvmConnected()
+            let isKvmConnected = deps.IsKvmConnected()
+            let isExternalDisplayConnected = deps.IsExternalDisplayConnected()
+            let currentDockState = resolveDockState isKvmConnected isExternalDisplayConnected
 
-            match state.LastKvmState with
+            match state.LastDockState with
             | None ->
-                Log.Information("Initial status check: KVM IsConnected = {IsConnected}.", isConnected)
-                deps.UpdateUi isConnected
+                Log.Information(
+                    "Initial status check: DockState = {DockState} (KvmConnected = {IsKvmConnected}, ExternalDisplay = {IsExternalDisplayConnected}).",
+                    currentDockState,
+                    isKvmConnected,
+                    isExternalDisplayConnected
+                )
+
+                deps.UpdateUi currentDockState
 
                 let statusMsg =
-                    if isConnected then
-                        "Started monitoring KVM (Display is ACTIVE on this PC)."
-                    else
-                        "Started monitoring KVM (Display is SWITCHED AWAY)."
+                    match currentDockState with
+                    | DockState.Active -> "Started monitoring KVM (Display is ACTIVE on this PC)."
+                    | DockState.SwitchedAway -> "Started monitoring KVM (Display is SWITCHED AWAY)."
+                    | DockState.Unplugged -> "Started monitoring KVM (Dock is UNPLUGGED)."
 
                 deps.ShowToast "AV Access Switcher Started" statusMsg
-                Some { state with LastKvmState = Some isConnected }
+                Some { state with LastDockState = Some currentDockState }
 
-            | Some prevConnected when prevConnected <> isConnected || userTriggered ->
-                if prevConnected <> isConnected then
-                    Log.Information(
-                        "KVM State Transition: {PrevState} -> {NewState}.",
-                        (if prevConnected then "Active" else "SwitchedAway"),
-                        (if isConnected then "Active" else "SwitchedAway")
-                    )
+            | Some prevDockState when prevDockState <> currentDockState || userTriggered ->
+                if prevDockState <> currentDockState then
+                    Log.Information("KVM State Transition: {PrevState} -> {NewState}.", prevDockState, currentDockState)
                 else
-                    Log.Information("Manual status refresh: IsConnected = {IsConnected}.", isConnected)
+                    Log.Information("Manual status refresh: DockState = {DockState}.", currentDockState)
 
-                deps.UpdateUi isConnected
+                deps.UpdateUi currentDockState
 
-                if not isConnected then
+                match currentDockState with
+                | DockState.Unplugged ->
+                    deps.ShowToast "AV Access Dock Unplugged" "USB-C cable unplugged. Display is on internal screen."
+
+                | DockState.SwitchedAway ->
                     let applied = deps.SetTopology NativeDisplay.DisplayTopology.ShowOnlyInternal
 
                     let toastMsg =
@@ -102,20 +129,22 @@ module TrayStateLogic =
                             "KVM switched to other PC. (Failed to set topology)."
 
                     deps.ShowToast "AV Access KVM Switched Away" toastMsg
-                else if state.AutoExtendOnReconnect then
-                    let applied = deps.SetTopology NativeDisplay.DisplayTopology.Extend
 
-                    let toastMsg =
-                        if applied then
-                            "KVM reconnected. Display restored to Extend displays."
-                        else
-                            "KVM reconnected. (Failed to set topology)."
+                | DockState.Active ->
+                    if state.AutoExtendOnReconnect then
+                        let applied = deps.SetTopology NativeDisplay.DisplayTopology.Extend
 
-                    deps.ShowToast "AV Access KVM Reconnected" toastMsg
-                else
-                    deps.ShowToast "AV Access KVM Reconnected" "KVM is back online on this PC."
+                        let toastMsg =
+                            if applied then
+                                "KVM reconnected. Display restored to Extend displays."
+                            else
+                                "KVM reconnected. (Failed to set topology)."
 
-                Some { state with LastKvmState = Some isConnected }
+                        deps.ShowToast "AV Access KVM Reconnected" toastMsg
+                    else
+                        deps.ShowToast "AV Access KVM Reconnected" "KVM is back online on this PC."
+
+                Some { state with LastDockState = Some currentDockState }
 
             | Some _ -> Some state
 
@@ -193,23 +222,28 @@ type TrayApplicationContext() as this =
         with _ ->
             appIcon
 
-    let updateUiControls (isConnected: bool) =
-        if isConnected then
+    let updateUiControls (dockState: DockState) =
+        match dockState with
+        | DockState.Active ->
             statusMenuItem.Text <- "Status: KVM Active (Extended)"
             notifyIcon.Text <- "AV Access Switcher: Active (Extended)"
-        else
+        | DockState.SwitchedAway ->
             statusMenuItem.Text <- "Status: KVM Switched Away (Laptop Only)"
             notifyIcon.Text <- "AV Access Switcher: Switched Away (Laptop Only)"
+        | DockState.Unplugged ->
+            statusMenuItem.Text <- "Status: Dock Unplugged (Laptop Only)"
+            notifyIcon.Text <- "AV Access Switcher: Dock Unplugged (Laptop Only)"
 
         try
-            notifyIcon.Icon <- createStatusIcon (isConnected)
+            notifyIcon.Icon <- createStatusIcon (dockState = DockState.Active)
         with _ ->
             ()
 
     let appDeps = {
         IsKvmConnected = KvmDetector.isKvmConnected
+        IsExternalDisplayConnected = NativeDisplay.isExternalDisplayConnected
         SetTopology = NativeDisplay.setTopology
-        UpdateUi = fun isConnected -> postToUi (fun () -> updateUiControls isConnected)
+        UpdateUi = fun dockState -> postToUi (fun () -> updateUiControls dockState)
         ShowToast = fun title message -> postToUi (fun () -> showToast title message)
     }
 

@@ -75,3 +75,76 @@ module NativeDisplayTests =
             setTopologyWith invokeSetDisplayConfig startDisplaySwitch DisplayTopology.Extend
 
         Assert.That(result, Is.False)
+
+    [<TestCase(0x80000000u, false)>] // DISPLAYCONFIG_OUTPUT_TECHNOLOGY_INTERNAL
+    [<TestCase(11u, false)>] // DISPLAYCONFIG_OUTPUT_TECHNOLOGY_DISPLAYPORT_EMBEDDED
+    [<TestCase(6u, false)>] // DISPLAYCONFIG_OUTPUT_TECHNOLOGY_LVDS
+    [<TestCase(13u, false)>] // DISPLAYCONFIG_OUTPUT_TECHNOLOGY_UDI_EMBEDDED
+    [<TestCase(0xFFFFFFFFu, false)>] // DISPLAYCONFIG_OUTPUT_TECHNOLOGY_OTHER
+    [<TestCase(10u, true)>] // DISPLAYCONFIG_OUTPUT_TECHNOLOGY_DISPLAYPORT_EXTERNAL
+    [<TestCase(5u, true)>] // DISPLAYCONFIG_OUTPUT_TECHNOLOGY_HDMI
+    [<TestCase(4u, true)>] // DISPLAYCONFIG_OUTPUT_TECHNOLOGY_DVI
+    let ``isExternalOutputTechnology distinguishes internal and external output technologies``
+        (tech: uint32, expected: bool)
+        =
+        Assert.That(isExternalOutputTechnology tech, Is.EqualTo(expected))
+
+    [<TestCase(10u, true, true)>]
+    [<TestCase(10u, false, false)>]
+    [<TestCase(0x80000000u, true, false)>]
+    [<TestCase(11u, true, false)>]
+    let ``isExternalDisplayTarget requires both TargetAvailable and external technology``
+        (tech: uint32, available: bool, expected: bool)
+        =
+        let target = {
+            TargetId = 261u
+            OutputTechnology = tech
+            TargetAvailable = available
+        }
+
+        Assert.That(isExternalDisplayTarget target, Is.EqualTo(expected))
+
+    [<Test>]
+    let ``isExternalDisplayConnectedWith returns true when an available external target is present`` () =
+        let targets () =
+            seq {
+                {
+                    TargetId = 256u
+                    OutputTechnology = DISPLAYCONFIG_OUTPUT_TECHNOLOGY_INTERNAL
+                    TargetAvailable = true
+                }
+
+                {
+                    TargetId = 261u
+                    OutputTechnology = 10u // DisplayPort External
+                    TargetAvailable = true
+                }
+            }
+
+        Assert.That(isExternalDisplayConnectedWith targets, Is.True)
+
+    [<Test>]
+    let ``isExternalDisplayConnectedWith returns false when only internal target is available`` () =
+        let targets () =
+            seq {
+                {
+                    TargetId = 256u
+                    OutputTechnology = DISPLAYCONFIG_OUTPUT_TECHNOLOGY_INTERNAL
+                    TargetAvailable = true
+                }
+
+                {
+                    TargetId = 261u
+                    OutputTechnology = 10u // DisplayPort External
+                    TargetAvailable = false
+                }
+            }
+
+        Assert.That(isExternalDisplayConnectedWith targets, Is.False)
+
+    [<Test>]
+    let ``isExternalDisplayConnectedWith returns false when query throws`` () =
+        let targets () : DisplayTargetInfo seq =
+            raise (InvalidOperationException("CCD failure"))
+
+        Assert.That(isExternalDisplayConnectedWith targets, Is.False)

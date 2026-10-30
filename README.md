@@ -106,7 +106,7 @@ MIT License.
 
 - [x] Single instance mode
 - [x] Add unit tests
-- [ ] Better handler full unplug/replug
+- [x] Better handler full unplug/replug
 - [ ] Option to prevent sleep
 
 ---

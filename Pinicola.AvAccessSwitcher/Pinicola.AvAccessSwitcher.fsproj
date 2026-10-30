@@ -19,6 +19,7 @@
     <Content Include="icon.png" CopyToOutputDirectory="PreserveNewest" />
     <Compile Include="NativeDisplay.fs" />
     <Compile Include="KvmDetector.fs" />
+    <Compile Include="CursorActivity.fs" />
     <Compile Include="TrayApplication.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>

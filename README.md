@@ -33,6 +33,7 @@ However, because Windows believes the monitor is always connected, it continues 
 - **Tray Context Menu Controls:**
   - **Status Display:** Shows current real-time KVM state.
   - **Auto-Extend on Switch Back:** `[✓]` Option to automatically restore Extended mode upon reconnecting.
+  - **Keep screen awake:** `[ ]` Option to prevent the screen from turning off by performing brief cursor activity for 2 seconds after 2 minutes of inactivity and returning the cursor to its original position.
   - **Force: Show Only on 1:** Instant manual switch to Laptop primary screen.
   - **Force: Extend Displays:** Instant manual switch to Extended desktop.
   - **Check Status Now:** Manual status refresh trigger.
@@ -90,6 +91,7 @@ Pinicola.AvAccessSwitcher/
     ├── icon.ico / icon.png                     # Application icon assets
     ├── NativeDisplay.fs                        # SetDisplayConfig P/Invoke & fallback
     ├── KvmDetector.fs                          # Functional AV Access PnP detector
+    ├── CursorActivity.fs                       # Idle cursor detection & screen wake helper
     ├── TrayApplication.fs                      # MailboxProcessor state actor & NotifyIcon UI
     └── Program.fs                              # WinExe entry point & Serilog logger setup
 ```
@@ -107,6 +109,6 @@ MIT License.
 - [x] Single instance mode
 - [x] Add unit tests
 - [x] Better handler full unplug/replug
-- [ ] Option to prevent sleep
+- [x] Option to prevent sleep
 
 ---

@@ -12,6 +12,7 @@
     <None Include="paket.references" />
     <Compile Include="NativeDisplayTests.fs" />
     <Compile Include="KvmDetectorTests.fs" />
+    <Compile Include="CursorActivityTests.fs" />
     <Compile Include="TrayApplicationTests.fs" />
     <Compile Include="ProgramTests.fs" />
   </ItemGroup>

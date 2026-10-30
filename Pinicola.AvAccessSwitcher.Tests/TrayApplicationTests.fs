@@ -1,5 +1,6 @@
 namespace Pinicola.AvAccessSwitcher.Tests
 
+open System
 open NUnit.Framework
 open Pinicola.AvAccessSwitcher
 open Pinicola.AvAccessSwitcher.NativeDisplay
@@ -12,6 +13,9 @@ module TrayApplicationTests =
         AppliedTopologies: ResizeArray<DisplayTopology>
         UiStates: ResizeArray<DockState>
         Toasts: ResizeArray<string * string>
+        ActivityCount: int ref
+        Timestamp: TimeSpan ref
+        CursorPos: (int * int) ref
     }
 
     let private createHarness
@@ -22,6 +26,9 @@ module TrayApplicationTests =
         let appliedTopologies = ResizeArray<DisplayTopology>()
         let uiStates = ResizeArray<DockState>()
         let toasts = ResizeArray<string * string>()
+        let activityCount = ref 0
+        let timestamp = ref (TimeSpan.FromSeconds(1.0))
+        let cursorPos = ref (100, 100)
 
         let deps = {
             IsKvmConnected = fun () -> isKvmConnected
@@ -32,6 +39,12 @@ module TrayApplicationTests =
                     topologySuccess
             UpdateUi = fun dockState -> uiStates.Add(dockState)
             ShowToast = fun title msg -> toasts.Add((title, msg))
+            GetTimestamp = fun () -> timestamp.Value
+            GetCursorPosition = fun () -> cursorPos.Value
+            KeepScreenAwake =
+                fun () ->
+                    activityCount.Value <- activityCount.Value + 1
+                    cursorPos.Value
         }
 
         {
@@ -39,6 +52,9 @@ module TrayApplicationTests =
             AppliedTopologies = appliedTopologies
             UiStates = uiStates
             Toasts = toasts
+            ActivityCount = activityCount
+            Timestamp = timestamp
+            CursorPos = cursorPos
         }
 
     [<Test>]
@@ -65,12 +81,35 @@ module TrayApplicationTests =
             TrayStateLogic.step harness.Dependencies TrayStateLogic.initialState (SetAutoExtend false)
 
         let expected =
-            Some {
-                LastDockState = None
-                AutoExtendOnReconnect = false
-            }
+            Some { TrayStateLogic.initialState with AutoExtendOnReconnect = false }
 
         Assert.That(result, Is.EqualTo(expected))
+
+    [<Test>]
+    let ``SetKeepScreenAwake initializes and clears CursorIdleTracker`` () =
+        let harness = createHarness true true true
+        harness.Timestamp.Value <- TimeSpan.FromSeconds(5.0)
+        harness.CursorPos.Value <- (250, 350)
+
+        let enabledResult =
+            TrayStateLogic.step harness.Dependencies TrayStateLogic.initialState (SetKeepScreenAwake true)
+
+        let expectedEnabled =
+            Some {
+                TrayStateLogic.initialState with
+                    KeepScreenAwake = true
+                    CursorIdleTracker = {
+                        CursorActivity.LastCursorPos = Some(250, 350)
+                        CursorActivity.LastMoveTimestamp = TimeSpan.FromSeconds(5.0)
+                    }
+            }
+
+        Assert.That(enabledResult, Is.EqualTo(expectedEnabled))
+
+        let disabledResult =
+            TrayStateLogic.step harness.Dependencies enabledResult.Value (SetKeepScreenAwake false)
+
+        Assert.That(disabledResult, Is.EqualTo(Some TrayStateLogic.initialState))
 
     [<Test>]
     let ``ForceLaptop sets ShowOnlyInternal topology and shows toast on success`` () =
@@ -128,8 +167,9 @@ module TrayApplicationTests =
 
         let expectedState =
             Some {
-                LastDockState = Some expectedDockState
-                AutoExtendOnReconnect = true
+                TrayStateLogic.initialState with
+                    LastDockState = Some expectedDockState
+                    AutoExtendOnReconnect = true
             }
 
         Assert.That(result, Is.EqualTo(expectedState))
@@ -145,17 +185,15 @@ module TrayApplicationTests =
         let harness = createHarness false true topologySuccess
 
         let priorState = {
-            LastDockState = Some DockState.Active
-            AutoExtendOnReconnect = true
+            TrayStateLogic.initialState with
+                LastDockState = Some DockState.Active
+                AutoExtendOnReconnect = true
         }
 
         let result = TrayStateLogic.step harness.Dependencies priorState (CheckStatus false)
 
         let expectedState =
-            Some {
-                LastDockState = Some DockState.SwitchedAway
-                AutoExtendOnReconnect = true
-            }
+            Some { priorState with LastDockState = Some DockState.SwitchedAway }
 
         Assert.That(result, Is.EqualTo(expectedState))
         Assert.That(harness.AppliedTopologies, Is.EqualTo(box [| DisplayTopology.ShowOnlyInternal |]))
@@ -170,17 +208,14 @@ module TrayApplicationTests =
         let harness = createHarness true true topologySuccess
 
         let priorState = {
-            LastDockState = Some DockState.SwitchedAway
-            AutoExtendOnReconnect = true
+            TrayStateLogic.initialState with
+                LastDockState = Some DockState.SwitchedAway
+                AutoExtendOnReconnect = true
         }
 
         let result = TrayStateLogic.step harness.Dependencies priorState (CheckStatus false)
 
-        let expectedState =
-            Some {
-                LastDockState = Some DockState.Active
-                AutoExtendOnReconnect = true
-            }
+        let expectedState = Some { priorState with LastDockState = Some DockState.Active }
 
         Assert.That(result, Is.EqualTo(expectedState))
         Assert.That(harness.AppliedTopologies, Is.EqualTo(box [| DisplayTopology.Extend |]))
@@ -192,17 +227,14 @@ module TrayApplicationTests =
         let harness = createHarness true true true
 
         let priorState = {
-            LastDockState = Some DockState.SwitchedAway
-            AutoExtendOnReconnect = false
+            TrayStateLogic.initialState with
+                LastDockState = Some DockState.SwitchedAway
+                AutoExtendOnReconnect = false
         }
 
         let result = TrayStateLogic.step harness.Dependencies priorState (CheckStatus false)
 
-        let expectedState =
-            Some {
-                LastDockState = Some DockState.Active
-                AutoExtendOnReconnect = false
-            }
+        let expectedState = Some { priorState with LastDockState = Some DockState.Active }
 
         Assert.That(result, Is.EqualTo(expectedState))
         Assert.That(harness.AppliedTopologies, Is.Empty)
@@ -218,17 +250,15 @@ module TrayApplicationTests =
         let harness = createHarness false false true
 
         let priorState = {
-            LastDockState = Some DockState.Active
-            AutoExtendOnReconnect = true
+            TrayStateLogic.initialState with
+                LastDockState = Some DockState.Active
+                AutoExtendOnReconnect = true
         }
 
         let result = TrayStateLogic.step harness.Dependencies priorState (CheckStatus false)
 
         let expectedState =
-            Some {
-                LastDockState = Some DockState.Unplugged
-                AutoExtendOnReconnect = true
-            }
+            Some { priorState with LastDockState = Some DockState.Unplugged }
 
         Assert.That(result, Is.EqualTo(expectedState))
         Assert.That(harness.AppliedTopologies, Is.Empty)
@@ -245,8 +275,9 @@ module TrayApplicationTests =
         let usbOnlyHarness = createHarness true false true
 
         let unpluggedState = {
-            LastDockState = Some DockState.Unplugged
-            AutoExtendOnReconnect = true
+            TrayStateLogic.initialState with
+                LastDockState = Some DockState.Unplugged
+                AutoExtendOnReconnect = true
         }
 
         let afterUsbStep =
@@ -264,10 +295,7 @@ module TrayApplicationTests =
             TrayStateLogic.step fullHarness.Dependencies afterUsbStep.Value (CheckStatus false)
 
         let expectedActiveState =
-            Some {
-                LastDockState = Some DockState.Active
-                AutoExtendOnReconnect = true
-            }
+            Some { unpluggedState with LastDockState = Some DockState.Active }
 
         Assert.That(afterDisplayStep, Is.EqualTo(expectedActiveState))
         Assert.That(fullHarness.AppliedTopologies, Is.EqualTo(box [| DisplayTopology.Extend |]))
@@ -283,18 +311,16 @@ module TrayApplicationTests =
         let harness = createHarness false true true
 
         let unpluggedState = {
-            LastDockState = Some DockState.Unplugged
-            AutoExtendOnReconnect = true
+            TrayStateLogic.initialState with
+                LastDockState = Some DockState.Unplugged
+                AutoExtendOnReconnect = true
         }
 
         let result =
             TrayStateLogic.step harness.Dependencies unpluggedState (CheckStatus false)
 
         let expectedState =
-            Some {
-                LastDockState = Some DockState.SwitchedAway
-                AutoExtendOnReconnect = true
-            }
+            Some { unpluggedState with LastDockState = Some DockState.SwitchedAway }
 
         Assert.That(result, Is.EqualTo(expectedState))
         Assert.That(harness.AppliedTopologies, Is.EqualTo(box [| DisplayTopology.ShowOnlyInternal |]))
@@ -315,8 +341,9 @@ module TrayApplicationTests =
         let harness = createHarness true true true
 
         let priorState = {
-            LastDockState = Some DockState.Active
-            AutoExtendOnReconnect = true
+            TrayStateLogic.initialState with
+                LastDockState = Some DockState.Active
+                AutoExtendOnReconnect = true
         }
 
         let result = TrayStateLogic.step harness.Dependencies priorState (CheckStatus false)
@@ -331,8 +358,9 @@ module TrayApplicationTests =
         let harness = createHarness true true true
 
         let priorState = {
-            LastDockState = Some DockState.Active
-            AutoExtendOnReconnect = true
+            TrayStateLogic.initialState with
+                LastDockState = Some DockState.Active
+                AutoExtendOnReconnect = true
         }
 
         let result = TrayStateLogic.step harness.Dependencies priorState (CheckStatus true)
@@ -341,3 +369,63 @@ module TrayApplicationTests =
         Assert.That(harness.AppliedTopologies, Is.EqualTo(box [| DisplayTopology.Extend |]))
         Assert.That(harness.UiStates, Is.EqualTo(box [| DockState.Active |]))
         Assert.That(harness.Toasts.Count, Is.EqualTo(1))
+
+    [<Test>]
+    let ``CheckStatus triggers cursor activity when KeepScreenAwake is enabled and cursor has not moved for 2 minutes``
+        ()
+        =
+        let harness = createHarness true true true
+        harness.Timestamp.Value <- TimeSpan.FromSeconds(10.0)
+        harness.CursorPos.Value <- (400, 300)
+
+        let initialActive = { TrayStateLogic.initialState with LastDockState = Some DockState.Active }
+
+        let stateWithKeepAwake =
+            (TrayStateLogic.step harness.Dependencies initialActive (SetKeepScreenAwake true)).Value
+
+        // 1 minute elapsed, cursor hasn't moved -> no activity
+        harness.Timestamp.Value <- TimeSpan.FromSeconds(70.0)
+
+        let afterOneMin =
+            (TrayStateLogic.step harness.Dependencies stateWithKeepAwake (CheckStatus false)).Value
+
+        Assert.That(harness.ActivityCount.Value, Is.EqualTo(0))
+
+        // 2 minutes elapsed -> triggers cursor activity
+        harness.Timestamp.Value <- TimeSpan.FromSeconds(130.0)
+
+        let afterTwoMin =
+            (TrayStateLogic.step harness.Dependencies afterOneMin (CheckStatus false)).Value
+
+        Assert.That(harness.ActivityCount.Value, Is.EqualTo(1))
+        Assert.That(afterTwoMin.CursorIdleTracker.LastMoveTimestamp, Is.EqualTo(TimeSpan.FromSeconds(130.0)))
+        Assert.That(afterTwoMin.CursorIdleTracker.LastCursorPos, Is.EqualTo(Some(400, 300)))
+
+    [<Test>]
+    let ``CheckStatus resets idle timer when cursor moves before 2 minutes`` () =
+        let harness = createHarness true true true
+        harness.Timestamp.Value <- TimeSpan.FromSeconds(10.0)
+        harness.CursorPos.Value <- (400, 300)
+
+        let initialActive = { TrayStateLogic.initialState with LastDockState = Some DockState.Active }
+
+        let stateWithKeepAwake =
+            (TrayStateLogic.step harness.Dependencies initialActive (SetKeepScreenAwake true)).Value
+
+        // 100s elapsed, user moves mouse
+        harness.Timestamp.Value <- TimeSpan.FromSeconds(110.0)
+        harness.CursorPos.Value <- (450, 320)
+
+        let afterMove =
+            (TrayStateLogic.step harness.Dependencies stateWithKeepAwake (CheckStatus false)).Value
+
+        Assert.That(harness.ActivityCount.Value, Is.EqualTo(0))
+        Assert.That(afterMove.CursorIdleTracker.LastMoveTimestamp, Is.EqualTo(TimeSpan.FromSeconds(110.0)))
+
+        // Another 60s elapsed (total 160s since start, but only 60s since move) -> no activity
+        harness.Timestamp.Value <- TimeSpan.FromSeconds(170.0)
+
+        let _ =
+            (TrayStateLogic.step harness.Dependencies afterMove (CheckStatus false)).Value
+
+        Assert.That(harness.ActivityCount.Value, Is.EqualTo(0))

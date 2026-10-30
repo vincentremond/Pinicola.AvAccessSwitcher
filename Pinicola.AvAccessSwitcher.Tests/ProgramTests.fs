@@ -34,7 +34,7 @@ module ProgramTests =
 
         Assert.That(options.AllowMultipleInstances, Is.False)
 
-    [<Test>]
+    [<Test; Explicit("Creates a real OS named mutex on the system.")>]
     let ``acquireSingleInstance acquires mutex and detects second instance until disposed`` () =
         let mutexName = sprintf @"Local\Pinicola.AvAccessSwitcher.Test.%O" (Guid.NewGuid())
 

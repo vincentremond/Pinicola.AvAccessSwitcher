@@ -1,9 +1,8 @@
 namespace Pinicola.AvAccessSwitcher
 
-open System
 open System.Diagnostics
-open System.Runtime.InteropServices
 open Serilog
+open Vanara.PInvoke
 
 module NativeDisplay =
 
@@ -17,111 +16,24 @@ module NativeDisplay =
     [<Literal>]
     let SDC_APPLY = 0x00000080u
 
-    [<Literal>]
-    let QDC_ALL_PATHS = 0x00000001u
-
-    [<Literal>]
-    let DISPLAYCONFIG_OUTPUT_TECHNOLOGY_OTHER = 0xFFFFFFFFu
-
-    [<Literal>]
-    let DISPLAYCONFIG_OUTPUT_TECHNOLOGY_LVDS = 6u
-
-    [<Literal>]
-    let DISPLAYCONFIG_OUTPUT_TECHNOLOGY_DISPLAYPORT_EMBEDDED = 11u
-
-    [<Literal>]
-    let DISPLAYCONFIG_OUTPUT_TECHNOLOGY_UDI_EMBEDDED = 13u
-
-    [<Literal>]
-    let DISPLAYCONFIG_OUTPUT_TECHNOLOGY_INTERNAL = 0x80000000u
-
-    [<Struct; StructLayout(LayoutKind.Sequential)>]
-    type LUID = {
-        LowPart: uint32
-        HighPart: int32
-    }
-
-    [<Struct; StructLayout(LayoutKind.Sequential)>]
-    type DISPLAYCONFIG_PATH_SOURCE_INFO = {
-        adapterId: LUID
-        id: uint32
-        modeInfoIdx: uint32
-        statusFlags: uint32
-    }
-
-    [<Struct; StructLayout(LayoutKind.Sequential)>]
-    type DISPLAYCONFIG_RATIONAL = {
-        Numerator: uint32
-        Denominator: uint32
-    }
-
-    [<Struct; StructLayout(LayoutKind.Sequential)>]
-    type DISPLAYCONFIG_PATH_TARGET_INFO = {
-        adapterId: LUID
-        id: uint32
-        modeInfoIdx: uint32
-        outputTechnology: uint32
-        rotation: uint32
-        scaling: uint32
-        refreshRate: DISPLAYCONFIG_RATIONAL
-        scanLineOrdering: uint32
-        targetAvailable: int32
-        statusFlags: uint32
-    }
-
-    [<Struct; StructLayout(LayoutKind.Sequential)>]
-    type DISPLAYCONFIG_PATH_INFO = {
-        sourceInfo: DISPLAYCONFIG_PATH_SOURCE_INFO
-        targetInfo: DISPLAYCONFIG_PATH_TARGET_INFO
-        flags: uint32
-    }
-
-    [<Struct; StructLayout(LayoutKind.Sequential, Size = 64)>]
-    type DISPLAYCONFIG_MODE_INFO = {
-        infoType: uint32
-        id: uint32
-        adapterId: LUID
-    }
-
     type DisplayTargetInfo = {
         TargetId: uint32
-        OutputTechnology: uint32
+        OutputTechnology: Gdi32.DISPLAYCONFIG_VIDEO_OUTPUT_TECHNOLOGY
         TargetAvailable: bool
     }
 
-    [<DllImport("user32.dll", SetLastError = true)>]
-    extern int private SetDisplayConfig(
-        uint32 numPathArrayElements,
-        nativeint pathArray,
-        uint32 numModeInfoArrayElements,
-        nativeint modeInfoArray,
-        uint32 flags
-    )
-
-    [<DllImport("user32.dll")>]
-    extern int private GetDisplayConfigBufferSizes(
-        uint32 flags,
-        [<Out>] uint32[] numPathArrayElements,
-        [<Out>] uint32[] numModeInfoArrayElements
-    )
-
-    [<DllImport("user32.dll")>]
-    extern int private QueryDisplayConfig(
-        uint32 flags,
-        [<In; Out>] uint32[] numPathArrayElements,
-        [<Out>] DISPLAYCONFIG_PATH_INFO[] pathArray,
-        [<In; Out>] uint32[] numModeInfoArrayElements,
-        [<Out>] DISPLAYCONFIG_MODE_INFO[] modeInfoArray,
-        nativeint currentTopologyId
-    )
-
     /// Determines whether a display output technology represents an external monitor connection.
-    let isExternalOutputTechnology (outputTechnology: uint32) : bool =
-        outputTechnology <> DISPLAYCONFIG_OUTPUT_TECHNOLOGY_INTERNAL
-        && outputTechnology <> DISPLAYCONFIG_OUTPUT_TECHNOLOGY_DISPLAYPORT_EMBEDDED
-        && outputTechnology <> DISPLAYCONFIG_OUTPUT_TECHNOLOGY_LVDS
-        && outputTechnology <> DISPLAYCONFIG_OUTPUT_TECHNOLOGY_UDI_EMBEDDED
-        && outputTechnology <> DISPLAYCONFIG_OUTPUT_TECHNOLOGY_OTHER
+    let isExternalOutputTechnology (outputTechnology: Gdi32.DISPLAYCONFIG_VIDEO_OUTPUT_TECHNOLOGY) : bool =
+        outputTechnology
+        <> Gdi32.DISPLAYCONFIG_VIDEO_OUTPUT_TECHNOLOGY.DISPLAYCONFIG_OUTPUT_TECHNOLOGY_INTERNAL
+        && outputTechnology
+           <> Gdi32.DISPLAYCONFIG_VIDEO_OUTPUT_TECHNOLOGY.DISPLAYCONFIG_OUTPUT_TECHNOLOGY_DISPLAYPORT_EMBEDDED
+        && outputTechnology
+           <> Gdi32.DISPLAYCONFIG_VIDEO_OUTPUT_TECHNOLOGY.DISPLAYCONFIG_OUTPUT_TECHNOLOGY_LVDS
+        && outputTechnology
+           <> Gdi32.DISPLAYCONFIG_VIDEO_OUTPUT_TECHNOLOGY.DISPLAYCONFIG_OUTPUT_TECHNOLOGY_UDI_EMBEDDED
+        && outputTechnology
+           <> Gdi32.DISPLAYCONFIG_VIDEO_OUTPUT_TECHNOLOGY.DISPLAYCONFIG_OUTPUT_TECHNOLOGY_OTHER
 
     /// Determines whether a display target represents a physically connected external monitor.
     let isExternalDisplayTarget (target: DisplayTargetInfo) : bool =
@@ -136,36 +48,22 @@ module NativeDisplay =
             false
 
     let private queryDisplayTargets () : DisplayTargetInfo seq =
-        let numPaths = [| 0u |]
-        let numModes = [| 0u |]
-        let sizeResult = GetDisplayConfigBufferSizes(QDC_ALL_PATHS, numPaths, numModes)
+        let err, paths, _, _ = User32.QueryDisplayConfig(User32.QDC.QDC_ALL_PATHS)
 
-        if sizeResult <> 0 || numPaths.[0] = 0u then
-            Log.Warning("GetDisplayConfigBufferSizes returned {Result} (paths={NumPaths}).", sizeResult, numPaths.[0])
+        if err.Failed || isNull paths then
+            Log.Warning("QueryDisplayConfig failed with error {Error}.", err)
             Seq.empty
         else
-            let paths = Array.zeroCreate<DISPLAYCONFIG_PATH_INFO> (int numPaths.[0])
-            let modes = Array.zeroCreate<DISPLAYCONFIG_MODE_INFO> (int numModes.[0])
+            paths
+            |> Seq.map (fun path ->
+                let target = path.targetInfo
 
-            let queryResult =
-                QueryDisplayConfig(QDC_ALL_PATHS, numPaths, paths, numModes, modes, IntPtr.Zero)
-
-            if queryResult <> 0 then
-                Log.Warning("QueryDisplayConfig returned {Result}.", queryResult)
-                Seq.empty
-            else
-                let count = min (int numPaths.[0]) paths.Length
-
-                seq {
-                    for i in 0 .. count - 1 do
-                        let target = paths.[i].targetInfo
-
-                        yield {
-                            TargetId = target.id
-                            OutputTechnology = target.outputTechnology
-                            TargetAvailable = target.targetAvailable <> 0
-                        }
+                {
+                    TargetId = target.id
+                    OutputTechnology = target.outputTechnology
+                    TargetAvailable = target.targetAvailable
                 }
+            )
 
     /// Checks if any external display target (e.g., dock video output) is physically connected.
     let isExternalDisplayConnected () : bool =
@@ -212,7 +110,9 @@ module NativeDisplay =
             false
 
     let private defaultInvokeSetDisplayConfig (flags: uint32) : int =
-        SetDisplayConfig(0u, IntPtr.Zero, 0u, IntPtr.Zero, flags)
+        let sdcFlags = enum<User32.SDC> (int flags)
+        let err = User32.SetDisplayConfig(null, null, sdcFlags)
+        int (uint32 err)
 
     let private defaultStartDisplaySwitch (arg: string) : unit =
         let psi =

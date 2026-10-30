@@ -6,6 +6,7 @@ nuget Microsoft.Toolkit.Uwp.Notifications
 nuget Serilog
 nuget Serilog.Sinks.File
 nuget System.Management
+nuget Vanara.PInvoke.User32
 
 group Tests
     source https://api.nuget.org/v3/index.json

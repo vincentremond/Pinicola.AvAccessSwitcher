@@ -4,6 +4,7 @@ open System
 open NUnit.Framework
 open Pinicola.AvAccessSwitcher
 open Pinicola.AvAccessSwitcher.NativeDisplay
+open Vanara.PInvoke
 
 [<TestFixture>]
 module NativeDisplayTests =
@@ -76,25 +77,31 @@ module NativeDisplayTests =
 
         Assert.That(result, Is.False)
 
-    [<TestCase(0x80000000u, false)>] // DISPLAYCONFIG_OUTPUT_TECHNOLOGY_INTERNAL
-    [<TestCase(11u, false)>] // DISPLAYCONFIG_OUTPUT_TECHNOLOGY_DISPLAYPORT_EMBEDDED
-    [<TestCase(6u, false)>] // DISPLAYCONFIG_OUTPUT_TECHNOLOGY_LVDS
-    [<TestCase(13u, false)>] // DISPLAYCONFIG_OUTPUT_TECHNOLOGY_UDI_EMBEDDED
-    [<TestCase(0xFFFFFFFFu, false)>] // DISPLAYCONFIG_OUTPUT_TECHNOLOGY_OTHER
-    [<TestCase(10u, true)>] // DISPLAYCONFIG_OUTPUT_TECHNOLOGY_DISPLAYPORT_EXTERNAL
-    [<TestCase(5u, true)>] // DISPLAYCONFIG_OUTPUT_TECHNOLOGY_HDMI
-    [<TestCase(4u, true)>] // DISPLAYCONFIG_OUTPUT_TECHNOLOGY_DVI
+    [<TestCase(Gdi32.DISPLAYCONFIG_VIDEO_OUTPUT_TECHNOLOGY.DISPLAYCONFIG_OUTPUT_TECHNOLOGY_INTERNAL, false)>]
+    [<TestCase(Gdi32.DISPLAYCONFIG_VIDEO_OUTPUT_TECHNOLOGY.DISPLAYCONFIG_OUTPUT_TECHNOLOGY_DISPLAYPORT_EMBEDDED, false)>]
+    [<TestCase(Gdi32.DISPLAYCONFIG_VIDEO_OUTPUT_TECHNOLOGY.DISPLAYCONFIG_OUTPUT_TECHNOLOGY_LVDS, false)>]
+    [<TestCase(Gdi32.DISPLAYCONFIG_VIDEO_OUTPUT_TECHNOLOGY.DISPLAYCONFIG_OUTPUT_TECHNOLOGY_UDI_EMBEDDED, false)>]
+    [<TestCase(Gdi32.DISPLAYCONFIG_VIDEO_OUTPUT_TECHNOLOGY.DISPLAYCONFIG_OUTPUT_TECHNOLOGY_OTHER, false)>]
+    [<TestCase(Gdi32.DISPLAYCONFIG_VIDEO_OUTPUT_TECHNOLOGY.DISPLAYCONFIG_OUTPUT_TECHNOLOGY_DISPLAYPORT_EXTERNAL, true)>]
+    [<TestCase(Gdi32.DISPLAYCONFIG_VIDEO_OUTPUT_TECHNOLOGY.DISPLAYCONFIG_OUTPUT_TECHNOLOGY_HDMI, true)>]
+    [<TestCase(Gdi32.DISPLAYCONFIG_VIDEO_OUTPUT_TECHNOLOGY.DISPLAYCONFIG_OUTPUT_TECHNOLOGY_DVI, true)>]
     let ``isExternalOutputTechnology distinguishes internal and external output technologies``
-        (tech: uint32, expected: bool)
+        (tech: Gdi32.DISPLAYCONFIG_VIDEO_OUTPUT_TECHNOLOGY, expected: bool)
         =
         Assert.That(isExternalOutputTechnology tech, Is.EqualTo(expected))
 
-    [<TestCase(10u, true, true)>]
-    [<TestCase(10u, false, false)>]
-    [<TestCase(0x80000000u, true, false)>]
-    [<TestCase(11u, true, false)>]
+    [<TestCase(Gdi32.DISPLAYCONFIG_VIDEO_OUTPUT_TECHNOLOGY.DISPLAYCONFIG_OUTPUT_TECHNOLOGY_DISPLAYPORT_EXTERNAL,
+               true,
+               true)>]
+    [<TestCase(Gdi32.DISPLAYCONFIG_VIDEO_OUTPUT_TECHNOLOGY.DISPLAYCONFIG_OUTPUT_TECHNOLOGY_DISPLAYPORT_EXTERNAL,
+               false,
+               false)>]
+    [<TestCase(Gdi32.DISPLAYCONFIG_VIDEO_OUTPUT_TECHNOLOGY.DISPLAYCONFIG_OUTPUT_TECHNOLOGY_INTERNAL, true, false)>]
+    [<TestCase(Gdi32.DISPLAYCONFIG_VIDEO_OUTPUT_TECHNOLOGY.DISPLAYCONFIG_OUTPUT_TECHNOLOGY_DISPLAYPORT_EMBEDDED,
+               true,
+               false)>]
     let ``isExternalDisplayTarget requires both TargetAvailable and external technology``
-        (tech: uint32, available: bool, expected: bool)
+        (tech: Gdi32.DISPLAYCONFIG_VIDEO_OUTPUT_TECHNOLOGY, available: bool, expected: bool)
         =
         let target = {
             TargetId = 261u
@@ -110,13 +117,15 @@ module NativeDisplayTests =
             seq {
                 {
                     TargetId = 256u
-                    OutputTechnology = DISPLAYCONFIG_OUTPUT_TECHNOLOGY_INTERNAL
+                    OutputTechnology =
+                        Gdi32.DISPLAYCONFIG_VIDEO_OUTPUT_TECHNOLOGY.DISPLAYCONFIG_OUTPUT_TECHNOLOGY_INTERNAL
                     TargetAvailable = true
                 }
 
                 {
                     TargetId = 261u
-                    OutputTechnology = 10u // DisplayPort External
+                    OutputTechnology =
+                        Gdi32.DISPLAYCONFIG_VIDEO_OUTPUT_TECHNOLOGY.DISPLAYCONFIG_OUTPUT_TECHNOLOGY_DISPLAYPORT_EXTERNAL
                     TargetAvailable = true
                 }
             }
@@ -129,13 +138,15 @@ module NativeDisplayTests =
             seq {
                 {
                     TargetId = 256u
-                    OutputTechnology = DISPLAYCONFIG_OUTPUT_TECHNOLOGY_INTERNAL
+                    OutputTechnology =
+                        Gdi32.DISPLAYCONFIG_VIDEO_OUTPUT_TECHNOLOGY.DISPLAYCONFIG_OUTPUT_TECHNOLOGY_INTERNAL
                     TargetAvailable = true
                 }
 
                 {
                     TargetId = 261u
-                    OutputTechnology = 10u // DisplayPort External
+                    OutputTechnology =
+                        Gdi32.DISPLAYCONFIG_VIDEO_OUTPUT_TECHNOLOGY.DISPLAYCONFIG_OUTPUT_TECHNOLOGY_DISPLAYPORT_EXTERNAL
                     TargetAvailable = false
                 }
             }

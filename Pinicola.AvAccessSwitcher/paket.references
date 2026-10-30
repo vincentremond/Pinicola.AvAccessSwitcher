@@ -3,3 +3,4 @@ Microsoft.Toolkit.Uwp.Notifications
 Serilog
 Serilog.Sinks.File
 System.Management
+Vanara.PInvoke.User32

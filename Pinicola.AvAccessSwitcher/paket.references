@@ -4,3 +4,4 @@ Serilog
 Serilog.Sinks.File
 System.Management
 Vanara.PInvoke.User32
+YamlDotNet

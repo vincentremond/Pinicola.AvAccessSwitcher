@@ -588,6 +588,7 @@ NUGET
       Vanara.Core (>= 5.0.8) - restriction: >= netstandard2.0
       Vanara.PInvoke.Gdi32 (>= 5.0.8) - restriction: >= netstandard2.0
       Vanara.PInvoke.Kernel32 (>= 5.0.8) - restriction: >= netstandard2.0
+    YamlDotNet (18.1)
 
 GROUP Tests
 STORAGE: NONE

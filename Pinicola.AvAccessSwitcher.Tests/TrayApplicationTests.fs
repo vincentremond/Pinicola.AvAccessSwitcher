@@ -13,6 +13,7 @@ module TrayApplicationTests =
         AppliedTopologies: ResizeArray<DisplayTopology>
         UiStates: ResizeArray<DockState>
         Toasts: ResizeArray<string * string>
+        SavedSettings: ResizeArray<UserSettings>
         ActivityCount: int ref
         Timestamp: TimeSpan ref
         CursorPos: (int * int) ref
@@ -26,6 +27,7 @@ module TrayApplicationTests =
         let appliedTopologies = ResizeArray<DisplayTopology>()
         let uiStates = ResizeArray<DockState>()
         let toasts = ResizeArray<string * string>()
+        let savedSettings = ResizeArray<UserSettings>()
         let activityCount = ref 0
         let timestamp = ref (TimeSpan.FromSeconds(1.0))
         let cursorPos = ref (100, 100)
@@ -45,6 +47,7 @@ module TrayApplicationTests =
                 fun () ->
                     activityCount.Value <- activityCount.Value + 1
                     cursorPos.Value
+            SaveSettings = fun settings -> savedSettings.Add(settings)
         }
 
         {
@@ -52,6 +55,7 @@ module TrayApplicationTests =
             AppliedTopologies = appliedTopologies
             UiStates = uiStates
             Toasts = toasts
+            SavedSettings = savedSettings
             ActivityCount = activityCount
             Timestamp = timestamp
             CursorPos = cursorPos
@@ -65,6 +69,19 @@ module TrayApplicationTests =
         Assert.That(TrayStateLogic.resolveDockState true true, Is.EqualTo(DockState.Active))
 
     [<Test>]
+    let ``createInitialState populates AutoExtendOnReconnect and KeepScreenAwake from UserSettings`` () =
+        let settings = {
+            AutoExtendOnReconnect = false
+            KeepScreenAwake = true
+        }
+
+        let state = TrayStateLogic.createInitialState settings
+
+        Assert.That(state.AutoExtendOnReconnect, Is.False)
+        Assert.That(state.KeepScreenAwake, Is.True)
+        Assert.That(state.LastDockState, Is.EqualTo(None))
+
+    [<Test>]
     let ``StopAgent returns None`` () =
         let harness = createHarness true true true
 
@@ -74,7 +91,7 @@ module TrayApplicationTests =
         Assert.That(result, Is.EqualTo(None))
 
     [<Test>]
-    let ``SetAutoExtend updates AutoExtendOnReconnect in state`` () =
+    let ``SetAutoExtend updates AutoExtendOnReconnect in state and saves settings`` () =
         let harness = createHarness true true true
 
         let result =
@@ -85,8 +102,20 @@ module TrayApplicationTests =
 
         Assert.That(result, Is.EqualTo(expected))
 
+        Assert.That(
+            harness.SavedSettings,
+            Is.EqualTo(
+                box [|
+                    {
+                        AutoExtendOnReconnect = false
+                        KeepScreenAwake = false
+                    }
+                |]
+            )
+        )
+
     [<Test>]
-    let ``SetKeepScreenAwake initializes and clears CursorIdleTracker`` () =
+    let ``SetKeepScreenAwake initializes and clears CursorIdleTracker and saves settings`` () =
         let harness = createHarness true true true
         harness.Timestamp.Value <- TimeSpan.FromSeconds(5.0)
         harness.CursorPos.Value <- (250, 350)
@@ -110,6 +139,22 @@ module TrayApplicationTests =
             TrayStateLogic.step harness.Dependencies enabledResult.Value (SetKeepScreenAwake false)
 
         Assert.That(disabledResult, Is.EqualTo(Some TrayStateLogic.initialState))
+
+        Assert.That(
+            harness.SavedSettings,
+            Is.EqualTo(
+                box [|
+                    {
+                        AutoExtendOnReconnect = true
+                        KeepScreenAwake = true
+                    }
+                    {
+                        AutoExtendOnReconnect = true
+                        KeepScreenAwake = false
+                    }
+                |]
+            )
+        )
 
     [<Test>]
     let ``ForceLaptop sets ShowOnlyInternal topology and shows toast on success`` () =

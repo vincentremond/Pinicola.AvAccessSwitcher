@@ -38,16 +38,19 @@ type AppDependencies = {
     GetTimestamp: unit -> TimeSpan
     GetCursorPosition: unit -> int * int
     KeepScreenAwake: unit -> int * int
+    SaveSettings: UserSettings -> unit
 }
 
 module TrayStateLogic =
 
-    let initialState = {
+    let createInitialState (settings: UserSettings) : AppState = {
         LastDockState = None
-        AutoExtendOnReconnect = true
-        KeepScreenAwake = false
+        AutoExtendOnReconnect = settings.AutoExtendOnReconnect
+        KeepScreenAwake = settings.KeepScreenAwake
         CursorIdleTracker = CursorActivity.initialTrackerState
     }
+
+    let initialState = createInitialState AppSettings.defaultSettings
 
     /// Resolves the current dock state from KVM USB presence and external display availability.
     let resolveDockState (isKvmConnected: bool) (isExternalDisplayConnected: bool) : DockState =
@@ -94,7 +97,14 @@ module TrayStateLogic =
 
         | SetAutoExtend enabled ->
             Log.Information("User toggled AutoExtendOnReconnect to {Enabled}.", enabled)
-            Some { state with AutoExtendOnReconnect = enabled }
+            let nextState = { state with AutoExtendOnReconnect = enabled }
+
+            deps.SaveSettings {
+                AutoExtendOnReconnect = nextState.AutoExtendOnReconnect
+                KeepScreenAwake = nextState.KeepScreenAwake
+            }
+
+            Some nextState
 
         | SetKeepScreenAwake enabled ->
             Log.Information("User toggled KeepScreenAwake to {Enabled}.", enabled)
@@ -108,11 +118,18 @@ module TrayStateLogic =
                 else
                     CursorActivity.initialTrackerState
 
-            Some {
+            let nextState = {
                 state with
                     KeepScreenAwake = enabled
                     CursorIdleTracker = tracker
             }
+
+            deps.SaveSettings {
+                AutoExtendOnReconnect = nextState.AutoExtendOnReconnect
+                KeepScreenAwake = nextState.KeepScreenAwake
+            }
+
+            Some nextState
 
         | ForceLaptop ->
             Log.Information("User requested manual switch: Force Show Only on 1.")
@@ -292,6 +309,8 @@ type TrayApplicationContext() as this =
         with _ ->
             ()
 
+    let initialSettings = AppSettings.load ()
+
     let appDeps = {
         IsKvmConnected = KvmDetector.isKvmConnected
         IsExternalDisplayConnected = NativeDisplay.isExternalDisplayConnected
@@ -301,6 +320,7 @@ type TrayApplicationContext() as this =
         GetTimestamp = fun () -> TimeSpan.FromMilliseconds(float Environment.TickCount64)
         GetCursorPosition = CursorActivity.defaultDeps.GetCursorPosition
         KeepScreenAwake = CursorActivity.keepScreenAwake
+        SaveSettings = AppSettings.save
     }
 
     // Pure functional MailboxProcessor managing state without mutable variables
@@ -315,18 +335,18 @@ type TrayApplicationContext() as this =
                     | Some nextState -> return! loop nextState
                 }
 
-            loop TrayStateLogic.initialState
+            loop (TrayStateLogic.createInitialState initialSettings)
         )
 
     do
         statusMenuItem.Enabled <- false
 
         autoRestoreMenuItem.CheckOnClick <- true
-        autoRestoreMenuItem.Checked <- true
+        autoRestoreMenuItem.Checked <- initialSettings.AutoExtendOnReconnect
         autoRestoreMenuItem.CheckedChanged.Add(fun _ -> stateAgent.Post(SetAutoExtend autoRestoreMenuItem.Checked))
 
         keepAwakeMenuItem.CheckOnClick <- true
-        keepAwakeMenuItem.Checked <- false
+        keepAwakeMenuItem.Checked <- initialSettings.KeepScreenAwake
         keepAwakeMenuItem.CheckedChanged.Add(fun _ -> stateAgent.Post(SetKeepScreenAwake keepAwakeMenuItem.Checked))
 
         checkNowMenuItem.Click.Add(fun _ -> stateAgent.Post(CheckStatus true))

@@ -20,6 +20,7 @@
     <Compile Include="NativeDisplay.fs" />
     <Compile Include="KvmDetector.fs" />
     <Compile Include="CursorActivity.fs" />
+    <Compile Include="AppSettings.fs" />
     <Compile Include="TrayApplication.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>

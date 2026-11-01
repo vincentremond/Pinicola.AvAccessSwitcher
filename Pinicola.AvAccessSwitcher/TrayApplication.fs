@@ -9,19 +9,19 @@ open System.Windows.Forms
 open Microsoft.Toolkit.Uwp.Notifications
 open Serilog
 
-type DockState =
+type internal DockState =
     | Unplugged
     | SwitchedAway
     | Active
 
-type AppState = {
+type internal AppState = {
     LastDockState: DockState option
     AutoExtendOnReconnect: bool
     KeepScreenAwake: bool
     CursorIdleTracker: CursorActivity.IdleTrackerState
 }
 
-type AppMsg =
+type internal AppMsg =
     | CheckStatus of userTriggered: bool
     | SetAutoExtend of enabled: bool
     | SetKeepScreenAwake of enabled: bool
@@ -29,7 +29,7 @@ type AppMsg =
     | ForceExtend
     | StopAgent
 
-type AppDependencies = {
+type internal AppDependencies = {
     IsKvmConnected: unit -> bool
     IsExternalDisplayConnected: unit -> bool
     SetTopology: NativeDisplay.DisplayTopology -> bool
@@ -41,7 +41,8 @@ type AppDependencies = {
     SaveSettings: UserSettings -> unit
 }
 
-module TrayStateLogic =
+[<RequireQualifiedAccess>]
+module internal TrayStateLogic =
 
     let createInitialState (settings: UserSettings) : AppState = {
         LastDockState = None
@@ -324,7 +325,7 @@ type TrayApplicationContext() as this =
         UpdateUi = fun dockState -> postToUi (fun () -> updateUiControls dockState)
         ShowToast = fun title message -> postToUi (fun () -> showToast title message)
         GetTimestamp = fun () -> TimeSpan.FromMilliseconds(float Environment.TickCount64)
-        GetCursorPosition = CursorActivity.defaultDeps.GetCursorPosition
+        GetCursorPosition = CursorActivity.getCursorPosition
         KeepScreenAwake = CursorActivity.keepScreenAwake
         SaveSettings = AppSettings.save
     }

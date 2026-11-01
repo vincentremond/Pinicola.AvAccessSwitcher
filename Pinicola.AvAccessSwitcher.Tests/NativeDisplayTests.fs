@@ -3,32 +3,33 @@ namespace Pinicola.AvAccessSwitcher.Tests
 open System
 open NUnit.Framework
 open Pinicola.AvAccessSwitcher
-open Pinicola.AvAccessSwitcher.NativeDisplay
 open Vanara.PInvoke
 
 [<TestFixture>]
 module NativeDisplayTests =
 
-    [<TestCase(DisplayTopology.ShowOnlyInternal, 0x00000081u)>]
-    [<TestCase(DisplayTopology.Clone, 0x00000082u)>]
-    [<TestCase(DisplayTopology.Extend, 0x00000084u)>]
-    [<TestCase(DisplayTopology.ShowOnlyExternal, 0x00000088u)>]
+    [<TestCase(NativeDisplay.DisplayTopology.ShowOnlyInternal, 0x00000081u)>]
+    [<TestCase(NativeDisplay.DisplayTopology.Clone, 0x00000082u)>]
+    [<TestCase(NativeDisplay.DisplayTopology.Extend, 0x00000084u)>]
+    [<TestCase(NativeDisplay.DisplayTopology.ShowOnlyExternal, 0x00000088u)>]
     let ``toDisplayConfigFlags combines topology flag with SDC_APPLY``
-        (topology: DisplayTopology, expectedFlags: uint32)
+        (topology: NativeDisplay.DisplayTopology, expectedFlags: uint32)
         =
         // Act
-        let actual = toDisplayConfigFlags topology
+        let actual = NativeDisplay.toDisplayConfigFlags topology
 
         // Assert
         Assert.That(actual, Is.EqualTo(expectedFlags))
 
-    [<TestCase(DisplayTopology.ShowOnlyInternal, "/internal")>]
-    [<TestCase(DisplayTopology.Clone, "/clone")>]
-    [<TestCase(DisplayTopology.Extend, "/extend")>]
-    [<TestCase(DisplayTopology.ShowOnlyExternal, "/external")>]
-    let ``toDisplaySwitchArg returns expected CLI argument`` (topology: DisplayTopology, expectedArg: string) =
+    [<TestCase(NativeDisplay.DisplayTopology.ShowOnlyInternal, "/internal")>]
+    [<TestCase(NativeDisplay.DisplayTopology.Clone, "/clone")>]
+    [<TestCase(NativeDisplay.DisplayTopology.Extend, "/extend")>]
+    [<TestCase(NativeDisplay.DisplayTopology.ShowOnlyExternal, "/external")>]
+    let ``toDisplaySwitchArg returns expected CLI argument``
+        (topology: NativeDisplay.DisplayTopology, expectedArg: string)
+        =
         // Act
-        let actual = toDisplaySwitchArg topology
+        let actual = NativeDisplay.toDisplaySwitchArg topology
 
         // Assert
         Assert.That(actual, Is.EqualTo(expectedArg))
@@ -36,10 +37,11 @@ module NativeDisplayTests =
     [<Test>]
     let ``toDisplaySwitchArg defaults to /extend for unknown topology value`` () =
         // Arrange
-        let unknownTopology = LanguagePrimitives.EnumOfValue<uint32, DisplayTopology> 999u
+        let unknownTopology =
+            LanguagePrimitives.EnumOfValue<uint32, NativeDisplay.DisplayTopology> 999u
 
         // Act
-        let actual = toDisplaySwitchArg unknownTopology
+        let actual = NativeDisplay.toDisplaySwitchArg unknownTopology
 
         // Assert
         Assert.That(actual, Is.EqualTo("/extend"))
@@ -58,7 +60,7 @@ module NativeDisplayTests =
 
         // Act
         let result =
-            setTopologyWith invokeSetDisplayConfig startDisplaySwitch DisplayTopology.Extend
+            NativeDisplay.setTopologyWith invokeSetDisplayConfig startDisplaySwitch NativeDisplay.DisplayTopology.Extend
 
         // Assert
         Assert.That(result, Is.True)
@@ -75,7 +77,10 @@ module NativeDisplayTests =
 
         // Act
         let result =
-            setTopologyWith invokeSetDisplayConfig startDisplaySwitch DisplayTopology.ShowOnlyInternal
+            NativeDisplay.setTopologyWith
+                invokeSetDisplayConfig
+                startDisplaySwitch
+                NativeDisplay.DisplayTopology.ShowOnlyInternal
 
         // Assert
         Assert.That(result, Is.True)
@@ -92,7 +97,7 @@ module NativeDisplayTests =
 
         // Act
         let result =
-            setTopologyWith invokeSetDisplayConfig startDisplaySwitch DisplayTopology.Extend
+            NativeDisplay.setTopologyWith invokeSetDisplayConfig startDisplaySwitch NativeDisplay.DisplayTopology.Extend
 
         // Assert
         Assert.That(result, Is.False)
@@ -109,7 +114,7 @@ module NativeDisplayTests =
         (tech: Gdi32.DISPLAYCONFIG_VIDEO_OUTPUT_TECHNOLOGY, expected: bool)
         =
         // Act
-        let actual = isExternalOutputTechnology tech
+        let actual = NativeDisplay.isExternalOutputTechnology tech
 
         // Assert
         Assert.That(actual, Is.EqualTo(expected))
@@ -128,14 +133,14 @@ module NativeDisplayTests =
         (tech: Gdi32.DISPLAYCONFIG_VIDEO_OUTPUT_TECHNOLOGY, available: bool, expected: bool)
         =
         // Arrange
-        let target = {
+        let target: NativeDisplay.DisplayTargetInfo = {
             TargetId = 261u
             OutputTechnology = tech
             TargetAvailable = available
         }
 
         // Act
-        let actual = isExternalDisplayTarget target
+        let actual = NativeDisplay.isExternalDisplayTarget target
 
         // Assert
         Assert.That(actual, Is.EqualTo(expected))
@@ -143,17 +148,17 @@ module NativeDisplayTests =
     [<Test>]
     let ``isExternalDisplayConnectedWith returns true when an available external target is present`` () =
         // Arrange
-        let targets () =
+        let targets () : NativeDisplay.DisplayTargetInfo seq =
             seq {
                 {
-                    TargetId = 256u
+                    NativeDisplay.TargetId = 256u
                     OutputTechnology =
                         Gdi32.DISPLAYCONFIG_VIDEO_OUTPUT_TECHNOLOGY.DISPLAYCONFIG_OUTPUT_TECHNOLOGY_INTERNAL
                     TargetAvailable = true
                 }
 
                 {
-                    TargetId = 261u
+                    NativeDisplay.TargetId = 261u
                     OutputTechnology =
                         Gdi32.DISPLAYCONFIG_VIDEO_OUTPUT_TECHNOLOGY.DISPLAYCONFIG_OUTPUT_TECHNOLOGY_DISPLAYPORT_EXTERNAL
                     TargetAvailable = true
@@ -161,7 +166,7 @@ module NativeDisplayTests =
             }
 
         // Act
-        let actual = isExternalDisplayConnectedWith targets
+        let actual = NativeDisplay.isExternalDisplayConnectedWith targets
 
         // Assert
         Assert.That(actual, Is.True)
@@ -169,17 +174,17 @@ module NativeDisplayTests =
     [<Test>]
     let ``isExternalDisplayConnectedWith returns false when only internal target is available`` () =
         // Arrange
-        let targets () =
+        let targets () : NativeDisplay.DisplayTargetInfo seq =
             seq {
                 {
-                    TargetId = 256u
+                    NativeDisplay.TargetId = 256u
                     OutputTechnology =
                         Gdi32.DISPLAYCONFIG_VIDEO_OUTPUT_TECHNOLOGY.DISPLAYCONFIG_OUTPUT_TECHNOLOGY_INTERNAL
                     TargetAvailable = true
                 }
 
                 {
-                    TargetId = 261u
+                    NativeDisplay.TargetId = 261u
                     OutputTechnology =
                         Gdi32.DISPLAYCONFIG_VIDEO_OUTPUT_TECHNOLOGY.DISPLAYCONFIG_OUTPUT_TECHNOLOGY_DISPLAYPORT_EXTERNAL
                     TargetAvailable = false
@@ -187,7 +192,7 @@ module NativeDisplayTests =
             }
 
         // Act
-        let actual = isExternalDisplayConnectedWith targets
+        let actual = NativeDisplay.isExternalDisplayConnectedWith targets
 
         // Assert
         Assert.That(actual, Is.False)
@@ -195,11 +200,11 @@ module NativeDisplayTests =
     [<Test>]
     let ``isExternalDisplayConnectedWith returns false when query throws`` () =
         // Arrange
-        let targets () : DisplayTargetInfo seq =
+        let targets () : NativeDisplay.DisplayTargetInfo seq =
             raise (InvalidOperationException("CCD failure"))
 
         // Act
-        let actual = isExternalDisplayConnectedWith targets
+        let actual = NativeDisplay.isExternalDisplayConnectedWith targets
 
         // Assert
         Assert.That(actual, Is.False)

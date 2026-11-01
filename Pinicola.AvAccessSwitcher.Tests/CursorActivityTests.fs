@@ -3,12 +3,11 @@ namespace Pinicola.AvAccessSwitcher.Tests
 open System
 open NUnit.Framework
 open Pinicola.AvAccessSwitcher
-open Pinicola.AvAccessSwitcher.CursorActivity
 
 [<TestFixture>]
 module CursorActivityTests =
 
-    let private defaultScreenBounds = {
+    let private defaultScreenBounds: CursorActivity.ScreenBounds = {
         Left = 0
         Top = 0
         Right = 1920
@@ -20,14 +19,18 @@ module CursorActivityTests =
         // Arrange
         let now = TimeSpan.FromSeconds(1.0)
 
-        let expected = {
+        let expected: CursorActivity.IdleTrackerState = {
             LastCursorPos = Some(100, 200)
             LastMoveTimestamp = now
         }
 
         // Act
         let nextState, shouldTrigger =
-            evaluateCursorIdle IdleThreshold now (100, 200) initialTrackerState
+            CursorActivity.evaluateCursorIdle
+                CursorActivity.IdleThreshold
+                now
+                (100, 200)
+                CursorActivity.initialTrackerState
 
         // Assert
         Assert.That(nextState, Is.EqualTo(expected))
@@ -36,21 +39,21 @@ module CursorActivityTests =
     [<Test>]
     let ``evaluateCursorIdle resets timer and does not trigger when cursor position changes`` () =
         // Arrange
-        let priorState = {
+        let priorState: CursorActivity.IdleTrackerState = {
             LastCursorPos = Some(100, 200)
             LastMoveTimestamp = TimeSpan.FromSeconds(1.0)
         }
 
         let now = TimeSpan.FromSeconds(150.0)
 
-        let expected = {
+        let expected: CursorActivity.IdleTrackerState = {
             LastCursorPos = Some(105, 210)
             LastMoveTimestamp = now
         }
 
         // Act
         let nextState, shouldTrigger =
-            evaluateCursorIdle IdleThreshold now (105, 210) priorState
+            CursorActivity.evaluateCursorIdle CursorActivity.IdleThreshold now (105, 210) priorState
 
         // Assert
         Assert.That(nextState, Is.EqualTo(expected))
@@ -59,7 +62,7 @@ module CursorActivityTests =
     [<Test>]
     let ``evaluateCursorIdle does not trigger when cursor is stationary for less than threshold`` () =
         // Arrange
-        let priorState = {
+        let priorState: CursorActivity.IdleTrackerState = {
             LastCursorPos = Some(100, 200)
             LastMoveTimestamp = TimeSpan.FromSeconds(1.0)
         }
@@ -68,7 +71,7 @@ module CursorActivityTests =
 
         // Act
         let nextState, shouldTrigger =
-            evaluateCursorIdle IdleThreshold now (100, 200) priorState
+            CursorActivity.evaluateCursorIdle CursorActivity.IdleThreshold now (100, 200) priorState
 
         // Assert
         Assert.That(nextState, Is.EqualTo(priorState))
@@ -77,21 +80,21 @@ module CursorActivityTests =
     [<Test>]
     let ``evaluateCursorIdle triggers activity and updates timestamp when stationary for at least 2 minutes`` () =
         // Arrange
-        let priorState = {
+        let priorState: CursorActivity.IdleTrackerState = {
             LastCursorPos = Some(100, 200)
             LastMoveTimestamp = TimeSpan.FromSeconds(1.0)
         }
 
         let now = TimeSpan.FromSeconds(121.0)
 
-        let expected = {
+        let expected: CursorActivity.IdleTrackerState = {
             LastCursorPos = Some(100, 200)
             LastMoveTimestamp = now
         }
 
         // Act
         let nextState, shouldTrigger =
-            evaluateCursorIdle IdleThreshold now (100, 200) priorState
+            CursorActivity.evaluateCursorIdle CursorActivity.IdleThreshold now (100, 200) priorState
 
         // Assert
         Assert.That(nextState, Is.EqualTo(expected))
@@ -112,7 +115,7 @@ module CursorActivityTests =
             1.5 * Math.PI // Up (-Y)
         |]
 
-        let deps = {
+        let deps: CursorActivity.CursorDeps = {
             GetCursorPosition = fun () -> currentPos.Value
             GetScreenBounds = fun _ -> defaultScreenBounds
             SendRelativeMove =
@@ -129,7 +132,7 @@ module CursorActivityTests =
                     a
         }
 
-        let options = {
+        let options: CursorActivity.CursorMovementOptions = {
             Duration = TimeSpan.FromSeconds(2.0)
             FrameInterval = TimeSpan.FromMilliseconds(20.0)
             DirectionChangeInterval = TimeSpan.FromMilliseconds(600.0)
@@ -138,7 +141,7 @@ module CursorActivityTests =
 
         let fastMoves = ResizeArray<int * int>()
 
-        let fastDeps = {
+        let fastDeps: CursorActivity.CursorDeps = {
             deps with
                 SendRelativeMove =
                     fun (dx, dy) ->
@@ -148,8 +151,10 @@ module CursorActivityTests =
         }
 
         // Act
-        let finalPos = performActivityWith deps options
-        let _ = performActivityWith fastDeps { options with SpeedPxPerSecond = 600.0 }
+        let finalPos = CursorActivity.performActivityWith deps options
+
+        let _ =
+            CursorActivity.performActivityWith fastDeps { options with SpeedPxPerSecond = 600.0 }
 
         // Assert
         Assert.That(finalPos, Is.EqualTo((500, 400)))
@@ -169,7 +174,7 @@ module CursorActivityTests =
     [<Test>]
     let ``performActivityWith keeps cursor strictly inside its current screen bounds and bounces off edges`` () =
         // Arrange: start near the top-left corner of a secondary monitor at (1920, 0) .. (3840, 1080)
-        let secondaryBounds = {
+        let secondaryBounds: CursorActivity.ScreenBounds = {
             Left = 1920
             Top = 0
             Right = 3840
@@ -179,7 +184,7 @@ module CursorActivityTests =
         let currentPos = ref (1925, 5)
         let visitedPositions = ResizeArray<int * int>()
 
-        let deps = {
+        let deps: CursorActivity.CursorDeps = {
             GetCursorPosition = fun () -> currentPos.Value
             GetScreenBounds = fun _ -> secondaryBounds
             SendRelativeMove =
@@ -194,7 +199,7 @@ module CursorActivityTests =
             NextDirectionAngle = fun () -> -0.75 * Math.PI
         }
 
-        let options = {
+        let options: CursorActivity.CursorMovementOptions = {
             Duration = TimeSpan.FromSeconds(2.0)
             FrameInterval = TimeSpan.FromMilliseconds(20.0)
             DirectionChangeInterval = TimeSpan.FromMilliseconds(400.0)
@@ -202,7 +207,7 @@ module CursorActivityTests =
         }
 
         // Act
-        let finalPos = performActivityWith deps options
+        let finalPos = CursorActivity.performActivityWith deps options
 
         // Assert
         Assert.That(finalPos, Is.EqualTo((1925, 5)))
@@ -220,7 +225,7 @@ module CursorActivityTests =
         // Arrange
         let currentPos = ref (600, 450)
 
-        let deps = {
+        let deps: CursorActivity.CursorDeps = {
             GetCursorPosition = fun () -> currentPos.Value
             GetScreenBounds = fun _ -> defaultScreenBounds
             SendRelativeMove =
@@ -235,7 +240,7 @@ module CursorActivityTests =
             NextDirectionAngle = fun () -> 0.4
         }
 
-        let options = {
+        let options: CursorActivity.CursorMovementOptions = {
             Duration = TimeSpan.FromMilliseconds(500.0)
             FrameInterval = TimeSpan.FromMilliseconds(20.0)
             DirectionChangeInterval = TimeSpan.FromMilliseconds(250.0)
@@ -243,7 +248,7 @@ module CursorActivityTests =
         }
 
         // Act
-        let finalPos = performActivityWith deps options
+        let finalPos = CursorActivity.performActivityWith deps options
 
         // Assert
         Assert.That(finalPos, Is.EqualTo((600, 450)))
@@ -259,7 +264,7 @@ module CursorActivityTests =
         let restoreCalls = ResizeArray<int * int>()
         let sleepCount = ref 0
 
-        let deps = {
+        let deps: CursorActivity.CursorDeps = {
             GetCursorPosition = fun () -> currentPos.Value
             GetScreenBounds = fun _ -> defaultScreenBounds
             SendRelativeMove =
@@ -281,7 +286,7 @@ module CursorActivityTests =
             NextDirectionAngle = fun () -> 0.0
         }
 
-        let options = {
+        let options: CursorActivity.CursorMovementOptions = {
             Duration = TimeSpan.FromSeconds(2.0)
             FrameInterval = TimeSpan.FromMilliseconds(20.0)
             DirectionChangeInterval = TimeSpan.FromMilliseconds(400.0)
@@ -289,7 +294,7 @@ module CursorActivityTests =
         }
 
         // Act
-        let finalPos = performActivityWith deps options
+        let finalPos = CursorActivity.performActivityWith deps options
 
         // Assert
         Assert.That(finalPos, Is.EqualTo((820, 640)))
@@ -306,7 +311,7 @@ module CursorActivityTests =
         let restoreCalls = ResizeArray<int * int>()
         let sleepCount = ref 0
 
-        let deps = {
+        let deps: CursorActivity.CursorDeps = {
             GetCursorPosition = fun () -> currentPos.Value
             GetScreenBounds = fun _ -> defaultScreenBounds
             SendRelativeMove =
@@ -327,7 +332,7 @@ module CursorActivityTests =
             NextDirectionAngle = fun () -> 0.0
         }
 
-        let options = {
+        let options: CursorActivity.CursorMovementOptions = {
             Duration = TimeSpan.FromMilliseconds(200.0)
             FrameInterval = TimeSpan.FromMilliseconds(20.0)
             DirectionChangeInterval = TimeSpan.FromMilliseconds(200.0)
@@ -335,7 +340,7 @@ module CursorActivityTests =
         }
 
         // Act
-        let finalPos = performActivityWith deps options
+        let finalPos = CursorActivity.performActivityWith deps options
 
         // Assert
         Assert.That(finalPos, Is.EqualTo((300, 220)))
@@ -345,7 +350,7 @@ module CursorActivityTests =
     [<Test>]
     let ``createRelativeMoveInput populates MOUSEINPUT dx and dy fields with zero mouseData`` () =
         // Act
-        let input = createRelativeMoveInput (15, -25)
+        let input = CursorActivity.createRelativeMoveInput (15, -25)
 
         // Assert
         Assert.That(input.``type``, Is.EqualTo(Vanara.PInvoke.User32.INPUTTYPE.INPUT_MOUSE))
@@ -357,11 +362,11 @@ module CursorActivityTests =
     [<Test; Explicit("Physically moves the mouse cursor on the system.")>]
     let ``keepScreenAwake physically moves the cursor and restores original position`` () =
         // Arrange
-        let before = defaultDeps.GetCursorPosition()
+        let before = CursorActivity.getCursorPosition ()
 
         // Act
-        let returned = keepScreenAwake ()
-        let after = defaultDeps.GetCursorPosition()
+        let returned = CursorActivity.keepScreenAwake ()
+        let after = CursorActivity.getCursorPosition ()
 
         // Assert
         Assert.That(returned, Is.EqualTo(before))

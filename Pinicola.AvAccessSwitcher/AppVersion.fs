@@ -9,6 +9,7 @@ type VersionInfo = {
     InformationalVersion: string
 }
 
+[<RequireQualifiedAccess>]
 module AppVersion =
 
     /// Parses an AssemblyInformationalVersion string (e.g. "0.1.0-17+Branch.main.Sha.1eedc72f8e...") into structured VersionInfo.
@@ -62,7 +63,7 @@ module AppVersion =
             }
 
     /// Formats a concise display version for UI controls (e.g. "v0.1.0-17 (1eedc72)").
-    let internal formatDisplayVersion (info: VersionInfo) : string =
+    let formatDisplayVersion (info: VersionInfo) : string =
         match info.ShortSha with
         | Some sha -> $"v{info.SemVer} ({sha})"
         | None -> $"v{info.SemVer}"

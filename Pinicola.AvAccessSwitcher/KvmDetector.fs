@@ -4,28 +4,29 @@ open System
 open System.Management
 open Serilog
 
+[<RequireQualifiedAccess>]
 module KvmDetector =
 
-    type PnpDeviceInfo = {
+    type internal PnpDeviceInfo = {
         DeviceId: string
         Name: string
     }
 
     [<Literal>]
-    let KvmHardwareIdToken = "VID_1D6B&PID_B022"
+    let private KvmHardwareIdToken = "VID_1D6B&PID_B022"
 
     [<Literal>]
-    let KvmNameToken = "AV Access"
+    let private KvmNameToken = "AV Access"
 
     /// Determines whether a PnP device matches the AV Access KVM USB hub/device.
-    let isMatchingDevice (device: PnpDeviceInfo) : bool =
+    let internal isMatchingDevice (device: PnpDeviceInfo) : bool =
         (not (isNull device.DeviceId)
          && device.DeviceId.Contains(KvmHardwareIdToken, StringComparison.OrdinalIgnoreCase))
         || (not (isNull device.Name)
             && device.Name.Contains(KvmNameToken, StringComparison.OrdinalIgnoreCase))
 
     /// Checks if any device returned by the query matches the AV Access KVM device.
-    let isKvmConnectedWith (queryDevices: unit -> PnpDeviceInfo seq) : bool =
+    let internal isKvmConnectedWith (queryDevices: unit -> PnpDeviceInfo seq) : bool =
         try
             queryDevices () |> Seq.exists isMatchingDevice
         with ex ->

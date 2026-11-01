@@ -12,17 +12,18 @@ type UserSettings = {
     KeepScreenAwake: bool
 }
 
+[<RequireQualifiedAccess>]
 module AppSettings =
 
     [<Literal>]
-    let SettingsFileName = "settings.yaml"
+    let private SettingsFileName = "settings.yaml"
 
     let defaultSettings: UserSettings = {
         AutoExtendOnReconnect = true
         KeepScreenAwake = false
     }
 
-    let defaultFilePath () : string =
+    let private defaultFilePath () : string =
         Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "Pinicola.AvAccessSwitcher",
@@ -48,10 +49,10 @@ module AppSettings =
         )
 
     /// Serializes user settings to a YAML string.
-    let serialize (settings: UserSettings) : string = serializer.Serialize(settings)
+    let internal serialize (settings: UserSettings) : string = serializer.Serialize(settings)
 
     /// Deserializes user settings from a YAML string, falling back to defaults for missing or invalid fields.
-    let deserialize (yaml: string) : UserSettings =
+    let internal deserialize (yaml: string) : UserSettings =
         if String.IsNullOrWhiteSpace(yaml) then
             defaultSettings
         else
@@ -78,7 +79,7 @@ module AppSettings =
                 defaultSettings
 
     /// Loads user settings from the specified YAML file path, or returns defaultSettings if the file does not exist or cannot be read.
-    let loadFrom (filePath: string) : UserSettings =
+    let internal loadFrom (filePath: string) : UserSettings =
         try
             if File.Exists(filePath) then
                 let yaml = File.ReadAllText(filePath)
@@ -100,7 +101,7 @@ module AppSettings =
             defaultSettings
 
     /// Saves user settings to the specified YAML file path, creating the parent directory if needed.
-    let saveTo (filePath: string) (settings: UserSettings) : unit =
+    let internal saveTo (filePath: string) (settings: UserSettings) : unit =
         try
             let dir = Path.GetDirectoryName(filePath)
 

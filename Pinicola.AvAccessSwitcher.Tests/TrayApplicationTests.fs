@@ -3,14 +3,13 @@ namespace Pinicola.AvAccessSwitcher.Tests
 open System
 open NUnit.Framework
 open Pinicola.AvAccessSwitcher
-open Pinicola.AvAccessSwitcher.NativeDisplay
 
 [<TestFixture>]
 module TrayApplicationTests =
 
-    type TestHarness = {
+    type private TestHarness = {
         Dependencies: AppDependencies
-        AppliedTopologies: ResizeArray<DisplayTopology>
+        AppliedTopologies: ResizeArray<NativeDisplay.DisplayTopology>
         UiStates: ResizeArray<DockState>
         Toasts: ResizeArray<string * string>
         SavedSettings: ResizeArray<UserSettings>
@@ -24,7 +23,7 @@ module TrayApplicationTests =
         (isExternalDisplayConnected: bool)
         (topologySuccess: bool)
         : TestHarness =
-        let appliedTopologies = ResizeArray<DisplayTopology>()
+        let appliedTopologies = ResizeArray<NativeDisplay.DisplayTopology>()
         let uiStates = ResizeArray<DockState>()
         let toasts = ResizeArray<string * string>()
         let savedSettings = ResizeArray<UserSettings>()
@@ -185,7 +184,7 @@ module TrayApplicationTests =
 
         // Assert
         Assert.That(result, Is.EqualTo(Some TrayStateLogic.initialState))
-        Assert.That(harness.AppliedTopologies, Is.EqualTo(box [| DisplayTopology.ShowOnlyInternal |]))
+        Assert.That(harness.AppliedTopologies, Is.EqualTo(box [| NativeDisplay.DisplayTopology.ShowOnlyInternal |]))
 
         Assert.That(
             harness.Toasts,
@@ -202,7 +201,7 @@ module TrayApplicationTests =
             TrayStateLogic.step harness.Dependencies TrayStateLogic.initialState ForceLaptop
 
         // Assert
-        Assert.That(harness.AppliedTopologies, Is.EqualTo(box [| DisplayTopology.ShowOnlyInternal |]))
+        Assert.That(harness.AppliedTopologies, Is.EqualTo(box [| NativeDisplay.DisplayTopology.ShowOnlyInternal |]))
         Assert.That(harness.Toasts, Is.Empty)
 
     [<Test>]
@@ -216,7 +215,7 @@ module TrayApplicationTests =
 
         // Assert
         Assert.That(result, Is.EqualTo(Some TrayStateLogic.initialState))
-        Assert.That(harness.AppliedTopologies, Is.EqualTo(box [| DisplayTopology.Extend |]))
+        Assert.That(harness.AppliedTopologies, Is.EqualTo(box [| NativeDisplay.DisplayTopology.Extend |]))
 
         Assert.That(
             harness.Toasts,
@@ -274,7 +273,7 @@ module TrayApplicationTests =
 
         // Assert
         Assert.That(result, Is.EqualTo(expectedState))
-        Assert.That(harness.AppliedTopologies, Is.EqualTo(box [| DisplayTopology.ShowOnlyInternal |]))
+        Assert.That(harness.AppliedTopologies, Is.EqualTo(box [| NativeDisplay.DisplayTopology.ShowOnlyInternal |]))
         Assert.That(harness.UiStates, Is.EqualTo(box [| DockState.SwitchedAway |]))
         Assert.That(harness.Toasts, Is.EqualTo(box [| ("AV Access KVM Switched Away", expectedMsg) |]))
 
@@ -299,7 +298,7 @@ module TrayApplicationTests =
 
         // Assert
         Assert.That(result, Is.EqualTo(expectedState))
-        Assert.That(harness.AppliedTopologies, Is.EqualTo(box [| DisplayTopology.Extend |]))
+        Assert.That(harness.AppliedTopologies, Is.EqualTo(box [| NativeDisplay.DisplayTopology.Extend |]))
         Assert.That(harness.UiStates, Is.EqualTo(box [| DockState.Active |]))
         Assert.That(harness.Toasts, Is.EqualTo(box [| ("AV Access KVM Reconnected", expectedMsg) |]))
 
@@ -389,7 +388,7 @@ module TrayApplicationTests =
 
         // Assert (Step 2: transitions to Active and applies Extend)
         Assert.That(afterDisplayStep, Is.EqualTo(expectedActiveState))
-        Assert.That(fullHarness.AppliedTopologies, Is.EqualTo(box [| DisplayTopology.Extend |]))
+        Assert.That(fullHarness.AppliedTopologies, Is.EqualTo(box [| NativeDisplay.DisplayTopology.Extend |]))
         Assert.That(fullHarness.UiStates, Is.EqualTo(box [| DockState.Active |]))
 
         Assert.That(
@@ -417,7 +416,7 @@ module TrayApplicationTests =
 
         // Assert
         Assert.That(result, Is.EqualTo(expectedState))
-        Assert.That(harness.AppliedTopologies, Is.EqualTo(box [| DisplayTopology.ShowOnlyInternal |]))
+        Assert.That(harness.AppliedTopologies, Is.EqualTo(box [| NativeDisplay.DisplayTopology.ShowOnlyInternal |]))
         Assert.That(harness.UiStates, Is.EqualTo(box [| DockState.SwitchedAway |]))
 
         Assert.That(
@@ -466,7 +465,7 @@ module TrayApplicationTests =
 
         // Assert
         Assert.That(result, Is.EqualTo(Some priorState))
-        Assert.That(harness.AppliedTopologies, Is.EqualTo(box [| DisplayTopology.Extend |]))
+        Assert.That(harness.AppliedTopologies, Is.EqualTo(box [| NativeDisplay.DisplayTopology.Extend |]))
         Assert.That(harness.UiStates, Is.EqualTo(box [| DockState.Active |]))
         Assert.That(harness.Toasts.Count, Is.EqualTo(1))
 

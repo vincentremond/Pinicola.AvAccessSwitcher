@@ -7,29 +7,30 @@ open System.Windows.Forms
 open Microsoft.Toolkit.Uwp.Notifications
 open Serilog
 
+[<RequireQualifiedAccess>]
 module Program =
 
     [<Literal>]
-    let MutexName = @"Local\Pinicola.AvAccessSwitcher.SingleInstance"
+    let private MutexName = @"Local\Pinicola.AvAccessSwitcher.SingleInstance"
 
     [<Literal>]
-    let AllowMultipleFlag = "--allow-multiple"
+    let private AllowMultipleFlag = "--allow-multiple"
 
-    type StartupOptions = { AllowMultipleInstances: bool }
+    type internal StartupOptions = { AllowMultipleInstances: bool }
 
-    type SingleInstanceResult =
+    type internal SingleInstanceResult =
         | Acquired of IDisposable
         | AlreadyRunning
         | AcquisitionFailed of exn
 
-    type ProgramDependencies = {
+    type internal ProgramDependencies = {
         AcquireSingleInstance: unit -> SingleInstanceResult
         NotifyAlreadyRunning: unit -> unit
         RunApplication: unit -> unit
     }
 
     /// Parses command-line arguments into strongly-typed startup options.
-    let parseArgs (argv: string array) : StartupOptions =
+    let internal parseArgs (argv: string array) : StartupOptions =
         let allowMultiple =
             argv
             |> Array.exists (fun arg -> String.Equals(arg, AllowMultipleFlag, StringComparison.OrdinalIgnoreCase))
@@ -37,7 +38,7 @@ module Program =
         { AllowMultipleInstances = allowMultiple }
 
     /// Attempts to acquire a named OS mutex for single-instance enforcement.
-    let acquireSingleInstance (mutexName: string) : SingleInstanceResult =
+    let internal acquireSingleInstance (mutexName: string) : SingleInstanceResult =
         try
             let mutable createdNew = false
             let mutex = new Mutex(true, mutexName, &createdNew)
@@ -63,7 +64,7 @@ module Program =
             AcquisitionFailed ex
 
     /// Executes the startup orchestration flow using injected dependencies.
-    let execute (deps: ProgramDependencies) (argv: string array) : int =
+    let internal execute (deps: ProgramDependencies) (argv: string array) : int =
         let options = parseArgs argv
 
         if options.AllowMultipleInstances then

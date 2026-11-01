@@ -2,7 +2,7 @@ namespace Pinicola.AvAccessSwitcher.Tests
 
 open System
 open NUnit.Framework
-open Pinicola.AvAccessSwitcher.KvmDetector
+open Pinicola.AvAccessSwitcher
 
 [<TestFixture>]
 module KvmDetectorTests =
@@ -18,13 +18,13 @@ module KvmDetectorTests =
         (deviceId: string, name: string, expected: bool)
         =
         // Arrange
-        let device = {
+        let device: KvmDetector.PnpDeviceInfo = {
             DeviceId = deviceId
             Name = name
         }
 
         // Act
-        let actual = isMatchingDevice device
+        let actual = KvmDetector.isMatchingDevice device
 
         // Assert
         Assert.That(actual, Is.EqualTo(expected))
@@ -32,21 +32,21 @@ module KvmDetectorTests =
     [<Test>]
     let ``isKvmConnectedWith returns true when at least one device matches`` () =
         // Arrange
-        let devices () =
+        let devices () : KvmDetector.PnpDeviceInfo seq =
             seq {
                 {
-                    DeviceId = @"USB\VID_046D&PID_C52B\1"
+                    KvmDetector.DeviceId = @"USB\VID_046D&PID_C52B\1"
                     Name = "Mouse"
                 }
 
                 {
-                    DeviceId = @"USB\VID_1D6B&PID_B022\2"
+                    KvmDetector.DeviceId = @"USB\VID_1D6B&PID_B022\2"
                     Name = "USB Root Hub"
                 }
             }
 
         // Act
-        let actual = isKvmConnectedWith devices
+        let actual = KvmDetector.isKvmConnectedWith devices
 
         // Assert
         Assert.That(actual, Is.True)
@@ -54,21 +54,21 @@ module KvmDetectorTests =
     [<Test>]
     let ``isKvmConnectedWith returns false when no devices match`` () =
         // Arrange
-        let devices () =
+        let devices () : KvmDetector.PnpDeviceInfo seq =
             seq {
                 {
-                    DeviceId = @"USB\VID_046D&PID_C52B\1"
+                    KvmDetector.DeviceId = @"USB\VID_046D&PID_C52B\1"
                     Name = "Mouse"
                 }
 
                 {
-                    DeviceId = @"PCI\VEN_8086\2"
+                    KvmDetector.DeviceId = @"PCI\VEN_8086\2"
                     Name = "Intel Host Bridge"
                 }
             }
 
         // Act
-        let actual = isKvmConnectedWith devices
+        let actual = KvmDetector.isKvmConnectedWith devices
 
         // Assert
         Assert.That(actual, Is.False)
@@ -79,7 +79,7 @@ module KvmDetectorTests =
         let devices () = Seq.empty
 
         // Act
-        let actual = isKvmConnectedWith devices
+        let actual = KvmDetector.isKvmConnectedWith devices
 
         // Assert
         Assert.That(actual, Is.False)
@@ -87,11 +87,11 @@ module KvmDetectorTests =
     [<Test>]
     let ``isKvmConnectedWith returns false when device query throws`` () =
         // Arrange
-        let devices () : PnpDeviceInfo seq =
+        let devices () : KvmDetector.PnpDeviceInfo seq =
             raise (InvalidOperationException("WMI unavailable"))
 
         // Act
-        let actual = isKvmConnectedWith devices
+        let actual = KvmDetector.isKvmConnectedWith devices
 
         // Assert
         Assert.That(actual, Is.False)

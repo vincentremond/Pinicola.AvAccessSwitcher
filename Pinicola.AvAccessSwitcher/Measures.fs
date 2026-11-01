@@ -2,6 +2,7 @@ namespace Pinicola.AvAccessSwitcher
 
 open System
 
+[<AutoOpen>]
 module Measures =
 
     [<Measure>]

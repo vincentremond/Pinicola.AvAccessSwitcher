@@ -4,6 +4,7 @@ open System.Diagnostics
 open Serilog
 open Vanara.PInvoke
 
+[<RequireQualifiedAccess>]
 module NativeDisplay =
 
     // Windows CCD (Connecting and Configuring Displays) flags for SetDisplayConfig
@@ -14,16 +15,16 @@ module NativeDisplay =
         | ShowOnlyExternal = 0x00000008u // SDC_TOPOLOGY_EXTERNAL (Show only on 2)
 
     [<Literal>]
-    let SDC_APPLY = 0x00000080u
+    let private SDC_APPLY = 0x00000080u
 
-    type DisplayTargetInfo = {
+    type internal DisplayTargetInfo = {
         TargetId: uint32
         OutputTechnology: Gdi32.DISPLAYCONFIG_VIDEO_OUTPUT_TECHNOLOGY
         TargetAvailable: bool
     }
 
     /// Determines whether a display output technology represents an external monitor connection.
-    let isExternalOutputTechnology (outputTechnology: Gdi32.DISPLAYCONFIG_VIDEO_OUTPUT_TECHNOLOGY) : bool =
+    let internal isExternalOutputTechnology (outputTechnology: Gdi32.DISPLAYCONFIG_VIDEO_OUTPUT_TECHNOLOGY) : bool =
         outputTechnology
         <> Gdi32.DISPLAYCONFIG_VIDEO_OUTPUT_TECHNOLOGY.DISPLAYCONFIG_OUTPUT_TECHNOLOGY_INTERNAL
         && outputTechnology
@@ -36,11 +37,11 @@ module NativeDisplay =
            <> Gdi32.DISPLAYCONFIG_VIDEO_OUTPUT_TECHNOLOGY.DISPLAYCONFIG_OUTPUT_TECHNOLOGY_OTHER
 
     /// Determines whether a display target represents a physically connected external monitor.
-    let isExternalDisplayTarget (target: DisplayTargetInfo) : bool =
+    let internal isExternalDisplayTarget (target: DisplayTargetInfo) : bool =
         target.TargetAvailable && isExternalOutputTechnology target.OutputTechnology
 
     /// Checks if any display target returned by the query is a connected external display.
-    let isExternalDisplayConnectedWith (queryTargets: unit -> DisplayTargetInfo seq) : bool =
+    let internal isExternalDisplayConnectedWith (queryTargets: unit -> DisplayTargetInfo seq) : bool =
         try
             queryTargets () |> Seq.exists isExternalDisplayTarget
         with ex ->
@@ -70,10 +71,10 @@ module NativeDisplay =
         isExternalDisplayConnectedWith queryDisplayTargets
 
     /// Compute the flags passed to SetDisplayConfig for a given topology
-    let toDisplayConfigFlags (topology: DisplayTopology) : uint32 = (uint32 topology) ||| SDC_APPLY
+    let internal toDisplayConfigFlags (topology: DisplayTopology) : uint32 = (uint32 topology) ||| SDC_APPLY
 
     /// Compute the DisplaySwitch.exe command-line argument for a given topology
-    let toDisplaySwitchArg (topology: DisplayTopology) : string =
+    let internal toDisplaySwitchArg (topology: DisplayTopology) : string =
         match topology with
         | DisplayTopology.ShowOnlyInternal -> "/internal"
         | DisplayTopology.Extend -> "/extend"
@@ -82,7 +83,7 @@ module NativeDisplay =
         | _ -> "/extend"
 
     /// Apply display topology using injected native API and fallback process starter
-    let setTopologyWith
+    let internal setTopologyWith
         (invokeSetDisplayConfig: uint32 -> int)
         (startDisplaySwitch: string -> unit)
         (topology: DisplayTopology)

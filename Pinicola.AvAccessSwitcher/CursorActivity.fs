@@ -8,46 +8,48 @@ open Pinicola.AvAccessSwitcher.Measures
 open Serilog
 open Vanara.PInvoke
 
+[<RequireQualifiedAccess>]
 module CursorActivity =
 
     let IdleThreshold = 2.0<Minute> |> Minute.toTimeSpan
 
-    let ActivityDuration = 400.0<Millisecond> |> Millisecond.toTimeSpan
+    let private ActivityDuration = 400.0<Millisecond> |> Millisecond.toTimeSpan
 
-    let FramesPerMillisecond = 60.0<Frame / Second> / millisecondPerSecond
+    let private FramesPerMillisecond = 60.0<Frame / Second> / millisecondPerSecond
 
-    let FrameInterval = 1.0<Frame> / FramesPerMillisecond |> Millisecond.toTimeSpan
+    let private FrameInterval =
+        1.0<Frame> / FramesPerMillisecond |> Millisecond.toTimeSpan
 
-    let DirectionChangeInterval = ActivityDuration / 4.0
-
-    [<Literal>]
-    let DefaultSpeedPxPerSecond = 250.0
+    let private DirectionChangeInterval = ActivityDuration / 4.0
 
     [<Literal>]
-    let ScreenEdgeMarginPx = 40
+    let private DefaultSpeedPxPerSecond = 250.0
 
-    type ScreenBounds = {
+    [<Literal>]
+    let private ScreenEdgeMarginPx = 40
+
+    type internal ScreenBounds = {
         Left: int
         Top: int
         Right: int
         Bottom: int
     }
 
-    type CursorMovementOptions = {
+    type internal CursorMovementOptions = {
         Duration: TimeSpan
         FrameInterval: TimeSpan
         DirectionChangeInterval: TimeSpan
         SpeedPxPerSecond: float
     }
 
-    let defaultOptions = {
+    let private defaultOptions = {
         Duration = ActivityDuration
         FrameInterval = FrameInterval
         DirectionChangeInterval = DirectionChangeInterval
         SpeedPxPerSecond = DefaultSpeedPxPerSecond
     }
 
-    type CursorDeps = {
+    type internal CursorDeps = {
         GetCursorPosition: unit -> int * int
         GetScreenBounds: int * int -> ScreenBounds
         SendRelativeMove: int * int -> unit
@@ -99,7 +101,7 @@ module CursorActivity =
                 state, false
 
     /// Reflects a direction angle if the projected step would move the cursor outside the safe bounds of its screen.
-    let constrainDirectionToBounds
+    let private constrainDirectionToBounds
         (bounds: ScreenBounds)
         (curX: int, curY: int)
         (stepDistancePx: float)
@@ -149,7 +151,7 @@ module CursorActivity =
         Math.Atan2(reflectedVy, reflectedVx)
 
     /// Smoothly moves the cursor in random directions within its current screen at the configured speed using SendInput, then smoothly glides back to its original position unless aborted by user mouse movement.
-    let performActivityWith (deps: CursorDeps) (options: CursorMovementOptions) : int * int =
+    let internal performActivityWith (deps: CursorDeps) (options: CursorMovementOptions) : int * int =
         let originPos = deps.GetCursorPosition()
         let originX, originY = originPos
         let screenBounds = deps.GetScreenBounds(originX, originY)
@@ -325,10 +327,11 @@ module CursorActivity =
                 originPos
 
     /// Creates a Win32 INPUT structure for a relative mouse move (mouseData = 0, dx, dy).
-    let createRelativeMoveInput (dx: int, dy: int) : User32.INPUT =
+    let internal createRelativeMoveInput (dx: int, dy: int) : User32.INPUT =
         User32.INPUT(User32.MOUSEEVENTF.MOUSEEVENTF_MOVE, 0, dx, dy)
 
-    let private defaultGetCursorPosition () : int * int =
+    /// Returns the current cursor coordinates via Win32 GetCursorPos.
+    let getCursorPosition () : int * int =
         let ok, pt = User32.GetCursorPos()
         if ok then (pt.X, pt.Y) else (0, 0)
 
@@ -366,14 +369,14 @@ module CursorActivity =
             let inputSize = System.Runtime.InteropServices.Marshal.SizeOf<User32.INPUT>()
             User32.SendInput(uint32 inputs.Length, inputs, inputSize) |> ignore
 
-        if defaultGetCursorPosition () <> (x, y) then
+        if getCursorPosition () <> (x, y) then
             User32.SetCursorPos(x, y) |> ignore
 
     let private defaultNextDirectionAngle () : float =
         Random.Shared.NextDouble() * 2.0 * Math.PI
 
-    let defaultDeps = {
-        GetCursorPosition = defaultGetCursorPosition
+    let private defaultDeps = {
+        GetCursorPosition = getCursorPosition
         GetScreenBounds = defaultGetScreenBounds
         SendRelativeMove = defaultSendRelativeMove
         RestoreExactPosition = defaultRestoreExactPosition
@@ -395,4 +398,4 @@ module CursorActivity =
             finalPos
         with ex ->
             Log.Error(ex, "Error while performing cursor activity.")
-            defaultGetCursorPosition ()
+            getCursorPosition ()

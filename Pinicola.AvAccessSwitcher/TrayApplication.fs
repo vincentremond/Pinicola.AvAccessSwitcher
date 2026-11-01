@@ -239,6 +239,8 @@ type TrayApplicationContext() as this =
             Log.Warning(ex, "Could not load embedded icon.ico resource. Falling back to default system icon.")
             SystemIcons.Application
 
+    let versionInfo = AppVersion.current
+
     // System Tray Icon & Context Menu Controls
     let notifyIcon = new NotifyIcon()
     let contextMenu = new ContextMenuStrip()
@@ -249,6 +251,10 @@ type TrayApplicationContext() as this =
     let checkNowMenuItem = new ToolStripMenuItem("Check Status Now")
     let forceLaptopMenuItem = new ToolStripMenuItem("Force: Show Only on 1")
     let forceExtendMenuItem = new ToolStripMenuItem("Force: Extend Displays")
+
+    let versionMenuItem =
+        new ToolStripMenuItem($"Version: {AppVersion.formatDisplayVersion versionInfo}")
+
     let exitMenuItem = new ToolStripMenuItem("Exit")
 
     let checkTimer = new Timer()
@@ -340,6 +346,7 @@ type TrayApplicationContext() as this =
 
     do
         statusMenuItem.Enabled <- false
+        versionMenuItem.Enabled <- false
 
         autoRestoreMenuItem.CheckOnClick <- true
         autoRestoreMenuItem.Checked <- initialSettings.AutoExtendOnReconnect
@@ -363,6 +370,7 @@ type TrayApplicationContext() as this =
         contextMenu.Items.Add(forceExtendMenuItem) |> ignore
         contextMenu.Items.Add(checkNowMenuItem) |> ignore
         contextMenu.Items.Add(new ToolStripSeparator()) |> ignore
+        contextMenu.Items.Add(versionMenuItem) |> ignore
         contextMenu.Items.Add(exitMenuItem) |> ignore
 
         notifyIcon.ContextMenuStrip <- contextMenu

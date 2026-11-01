@@ -14,12 +14,17 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="Pinicola.AvAccessSwitcher.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <None Include="paket.references" />
     <EmbeddedResource Include="icon.ico" />
     <Content Include="icon.png" CopyToOutputDirectory="PreserveNewest" />
     <Compile Include="NativeDisplay.fs" />
     <Compile Include="KvmDetector.fs" />
     <Compile Include="CursorActivity.fs" />
+    <Compile Include="AppVersion.fs" />
     <Compile Include="AppSettings.fs" />
     <Compile Include="TrayApplication.fs" />
     <Compile Include="Program.fs" />

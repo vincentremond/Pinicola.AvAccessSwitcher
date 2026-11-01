@@ -103,7 +103,13 @@ module Program =
                 .WriteTo.File(logFilePath, rollingInterval = RollingInterval.Day, retainedFileCountLimit = Nullable 14)
                 .CreateLogger()
 
-        Log.Information("Pinicola.AvAccessSwitcher starting up. Log file path: {LogPath}", logFilePath)
+        let versionInfo = AppVersion.current
+
+        Log.Information(
+            "Pinicola.AvAccessSwitcher {Version} starting up. Log file path: {LogPath}",
+            versionInfo.InformationalVersion,
+            logFilePath
+        )
 
     let private notifyAlreadyRunning () =
         try

@@ -18,6 +18,7 @@ module Program =
 
     type internal StartupOptions = { AllowMultipleInstances: bool }
 
+    [<RequireQualifiedAccess>]
     type internal SingleInstanceResult =
         | Acquired of IDisposable
         | AlreadyRunning
@@ -55,13 +56,13 @@ module Program =
                             mutex.Dispose()
                     }
 
-                Acquired handle
+                SingleInstanceResult.Acquired handle
             else
                 mutex.Dispose()
-                AlreadyRunning
+                SingleInstanceResult.AlreadyRunning
         with ex ->
             Log.Error(ex, "Failed to create or acquire single-instance mutex.")
-            AcquisitionFailed ex
+            SingleInstanceResult.AcquisitionFailed ex
 
     /// Executes the startup orchestration flow using injected dependencies.
     let internal execute (deps: ProgramDependencies) (argv: string array) : int =
@@ -73,17 +74,17 @@ module Program =
             0
         else
             match deps.AcquireSingleInstance() with
-            | AlreadyRunning ->
+            | SingleInstanceResult.AlreadyRunning ->
                 Log.Warning("Another instance of Pinicola.AvAccessSwitcher is already running. Exiting.")
                 deps.NotifyAlreadyRunning()
                 0
 
-            | Acquired instanceLock ->
+            | SingleInstanceResult.Acquired instanceLock ->
                 use _ = instanceLock
                 deps.RunApplication()
                 0
 
-            | AcquisitionFailed _ ->
+            | SingleInstanceResult.AcquisitionFailed _ ->
                 deps.RunApplication()
                 0
 

@@ -2,7 +2,7 @@ namespace Pinicola.AvAccessSwitcher.Tests
 
 open System
 open NUnit.Framework
-open Pinicola.AvAccessSwitcher.Program
+open Pinicola.AvAccessSwitcher
 
 [<TestFixture>]
 module ProgramTests =
@@ -13,7 +13,7 @@ module ProgramTests =
         let argv = [||]
 
         // Act
-        let options = parseArgs argv
+        let options = Program.parseArgs argv
 
         // Assert
         Assert.That(options.AllowMultipleInstances, Is.False)
@@ -29,7 +29,7 @@ module ProgramTests =
         |]
 
         // Act
-        let options = parseArgs argv
+        let options = Program.parseArgs argv
 
         // Assert
         Assert.That(options.AllowMultipleInstances, Is.True)
@@ -43,7 +43,7 @@ module ProgramTests =
         |]
 
         // Act
-        let options = parseArgs argv
+        let options = Program.parseArgs argv
 
         // Assert
         Assert.That(options.AllowMultipleInstances, Is.False)
@@ -54,22 +54,22 @@ module ProgramTests =
         let mutexName = sprintf @"Local\Pinicola.AvAccessSwitcher.Test.%O" (Guid.NewGuid())
 
         // Act
-        let firstAttempt = acquireSingleInstance mutexName
+        let firstAttempt = Program.acquireSingleInstance mutexName
 
         // Assert
         match firstAttempt with
-        | Acquired firstHandle ->
+        | Program.SingleInstanceResult.Acquired firstHandle ->
             try
                 // Act & Assert: second instance while held
-                match acquireSingleInstance mutexName with
-                | AlreadyRunning -> ()
+                match Program.acquireSingleInstance mutexName with
+                | Program.SingleInstanceResult.AlreadyRunning -> ()
                 | other -> Assert.Fail(sprintf "Expected AlreadyRunning, got %A" other)
             finally
                 firstHandle.Dispose()
 
             // Act & Assert: reacquire after disposal
-            match acquireSingleInstance mutexName with
-            | Acquired reacquiredHandle -> reacquiredHandle.Dispose()
+            match Program.acquireSingleInstance mutexName with
+            | Program.SingleInstanceResult.Acquired reacquiredHandle -> reacquiredHandle.Dispose()
             | other -> Assert.Fail(sprintf "Expected Acquired after disposal, got %A" other)
 
         | other -> Assert.Fail(sprintf "Expected first call to return Acquired, got %A" other)
@@ -79,17 +79,17 @@ module ProgramTests =
         // Arrange
         let events = ResizeArray<string>()
 
-        let deps = {
+        let deps: Program.ProgramDependencies = {
             AcquireSingleInstance =
                 fun () ->
                     events.Add("acquire")
-                    AlreadyRunning
+                    Program.SingleInstanceResult.AlreadyRunning
             NotifyAlreadyRunning = fun () -> events.Add("notify")
             RunApplication = fun () -> events.Add("run")
         }
 
         // Act
-        let exitCode = execute deps [| "--allow-multiple" |]
+        let exitCode = Program.execute deps [| "--allow-multiple" |]
 
         // Assert
         Assert.That(exitCode, Is.EqualTo(0))
@@ -105,17 +105,17 @@ module ProgramTests =
                 member _.Dispose() = events.Add("dispose")
             }
 
-        let deps = {
+        let deps: Program.ProgramDependencies = {
             AcquireSingleInstance =
                 fun () ->
                     events.Add("acquire")
-                    Acquired handle
+                    Program.SingleInstanceResult.Acquired handle
             NotifyAlreadyRunning = fun () -> events.Add("notify")
             RunApplication = fun () -> events.Add("run")
         }
 
         // Act
-        let exitCode = execute deps [||]
+        let exitCode = Program.execute deps [||]
 
         // Assert
         Assert.That(exitCode, Is.EqualTo(0))
@@ -136,17 +136,17 @@ module ProgramTests =
         // Arrange
         let events = ResizeArray<string>()
 
-        let deps = {
+        let deps: Program.ProgramDependencies = {
             AcquireSingleInstance =
                 fun () ->
                     events.Add("acquire")
-                    AlreadyRunning
+                    Program.SingleInstanceResult.AlreadyRunning
             NotifyAlreadyRunning = fun () -> events.Add("notify")
             RunApplication = fun () -> events.Add("run")
         }
 
         // Act
-        let exitCode = execute deps [||]
+        let exitCode = Program.execute deps [||]
 
         // Assert
         Assert.That(exitCode, Is.EqualTo(0))
@@ -166,17 +166,17 @@ module ProgramTests =
         // Arrange
         let events = ResizeArray<string>()
 
-        let deps = {
+        let deps: Program.ProgramDependencies = {
             AcquireSingleInstance =
                 fun () ->
                     events.Add("acquire")
-                    AcquisitionFailed(InvalidOperationException("Mutex failure"))
+                    Program.SingleInstanceResult.AcquisitionFailed(InvalidOperationException("Mutex failure"))
             NotifyAlreadyRunning = fun () -> events.Add("notify")
             RunApplication = fun () -> events.Add("run")
         }
 
         // Act
-        let exitCode = execute deps [||]
+        let exitCode = Program.execute deps [||]
 
         // Assert
         Assert.That(exitCode, Is.EqualTo(0))

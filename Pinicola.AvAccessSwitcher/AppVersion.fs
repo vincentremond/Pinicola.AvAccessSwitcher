@@ -85,5 +85,4 @@ module AppVersion =
         parseInformationalVersion rawVersion
 
     /// Returns the VersionInfo of the currently executing Pinicola.AvAccessSwitcher assembly.
-    let current : VersionInfo =
-        fromAssembly (Assembly.GetExecutingAssembly())
+    let current: VersionInfo = fromAssembly (Assembly.GetExecutingAssembly())

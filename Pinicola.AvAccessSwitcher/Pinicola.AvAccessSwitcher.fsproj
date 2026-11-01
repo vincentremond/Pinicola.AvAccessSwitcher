@@ -21,6 +21,7 @@
     <None Include="paket.references" />
     <EmbeddedResource Include="icon.ico" />
     <Content Include="icon.png" CopyToOutputDirectory="PreserveNewest" />
+    <Compile Include="Measures.fs" />
     <Compile Include="NativeDisplay.fs" />
     <Compile Include="KvmDetector.fs" />
     <Compile Include="CursorActivity.fs" />

@@ -4,18 +4,21 @@ open System
 open System.Drawing
 open System.Threading
 open System.Windows.Forms
+open Pinicola.AvAccessSwitcher.Measures
 open Serilog
 open Vanara.PInvoke
 
 module CursorActivity =
 
-    let IdleThreshold = TimeSpan.FromMinutes(2.0)
+    let IdleThreshold = 2.0<Minute> |> Minute.toTimeSpan
 
-    let ActivityDuration = TimeSpan.FromSeconds(2.0)
+    let ActivityDuration = 400.0<Millisecond> |> Millisecond.toTimeSpan
 
-    let FrameInterval = TimeSpan.FromMilliseconds(16.0)
+    let FramesPerMillisecond = 60.0<Frame / Second> / millisecondPerSecond
 
-    let DirectionChangeInterval = TimeSpan.FromMilliseconds(400.0)
+    let FrameInterval = 1.0<Frame> / FramesPerMillisecond |> Millisecond.toTimeSpan
+
+    let DirectionChangeInterval = ActivityDuration / 4.0
 
     [<Literal>]
     let DefaultSpeedPxPerSecond = 250.0
@@ -145,9 +148,10 @@ module CursorActivity =
 
         Math.Atan2(reflectedVy, reflectedVx)
 
-    /// Smoothly moves the cursor in random directions within its current screen at the configured speed using SendInput, then smoothly glides back to its original position.
+    /// Smoothly moves the cursor in random directions within its current screen at the configured speed using SendInput, then smoothly glides back to its original position unless aborted by user mouse movement.
     let performActivityWith (deps: CursorDeps) (options: CursorMovementOptions) : int * int =
-        let originX, originY = deps.GetCursorPosition()
+        let originPos = deps.GetCursorPosition()
+        let originX, originY = originPos
         let screenBounds = deps.GetScreenBounds(originX, originY)
 
         let minX = screenBounds.Left
@@ -176,10 +180,26 @@ module CursorActivity =
 
         let stepDistancePx = max 0.5 (options.SpeedPxPerSecond * frameInterval.TotalSeconds)
 
-        // Phase 1: Smooth movement along random direction vectors for options.Duration, bouncing off current screen edges
-        let rec moveRandomLoop (frameIdx: int) (angle: float) (remX: float) (remY: float) =
-            if frameIdx < totalFrames then
-                let curPos = deps.GetCursorPosition()
+        // Phase 1: Smooth movement along random direction vectors for options.Duration, bouncing off current screen edges.
+        // Returns Some userPos if the user moves the mouse during a frame sleep, or None if Phase 1 completes normally.
+        let rec moveRandomLoop
+            (frameIdx: int)
+            (expectedPos: int * int)
+            (angle: float)
+            (remX: float)
+            (remY: float)
+            : (int * int) option =
+            let curPos = deps.GetCursorPosition()
+
+            if curPos <> expectedPos then
+                Log.Information(
+                    "User mouse movement detected during cursor activity (expected {ExpectedPos}, actual {ActualPos}). Aborting automatic movement.",
+                    expectedPos,
+                    curPos
+                )
+
+                Some curPos
+            elif frameIdx < totalFrames then
                 let curX, curY = curPos
 
                 let rawAngle =
@@ -204,67 +224,105 @@ module CursorActivity =
                 if moveX <> 0 || moveY <> 0 then
                     deps.SendRelativeMove(moveX, moveY)
 
+                let posAfterSend = deps.GetCursorPosition()
                 deps.Sleep frameInterval
 
                 moveRandomLoop
                     (frameIdx + 1)
+                    posAfterSend
                     safeAngle
                     (targetX - float unclampedMoveX)
                     (targetY - float unclampedMoveY)
+            else
+                None
 
-        if totalFrames > 0 then
-            moveRandomLoop 0 0.0 0.0 0.0
+        let abortedDuringPhase1 =
+            if totalFrames > 0 then
+                moveRandomLoop 0 originPos 0.0 0.0 0.0
+            else
+                None
 
-        // Phase 2: Closed-loop smooth return glide to the exact origin at the configured speed
-        let initialReturnX, initialReturnY = deps.GetCursorPosition()
-        let initialDeltaX = originX - initialReturnX
-        let initialDeltaY = originY - initialReturnY
+        match abortedDuringPhase1 with
+        | Some userPos -> userPos
+        | None ->
+            // Phase 2: Closed-loop smooth return glide to the exact origin at the configured speed
+            let initialReturnPos = deps.GetCursorPosition()
+            let initialReturnX, initialReturnY = initialReturnPos
+            let initialDeltaX = originX - initialReturnX
+            let initialDeltaY = originY - initialReturnY
 
-        let initialDistance =
-            Math.Sqrt(float (initialDeltaX * initialDeltaX + initialDeltaY * initialDeltaY))
+            let initialDistance =
+                Math.Sqrt(float (initialDeltaX * initialDeltaX + initialDeltaY * initialDeltaY))
 
-        if initialDistance > 0.0 then
-            let maxReturnFrames =
-                max 20 (int (Math.Ceiling(initialDistance / stepDistancePx)) * 4 + 30)
+            let abortedDuringPhase2 =
+                if initialDistance > 0.0 then
+                    let maxReturnFrames =
+                        max 20 (int (Math.Ceiling(initialDistance / stepDistancePx)) * 4 + 30)
 
-            let rec returnLoop (stepIdx: int) (remX: float) (remY: float) (closeFrames: int) =
-                let curX, curY = deps.GetCursorPosition()
-                let dx = originX - curX
-                let dy = originY - curY
+                    let rec returnLoop
+                        (stepIdx: int)
+                        (expectedPos: int * int)
+                        (remX: float)
+                        (remY: float)
+                        (closeFrames: int)
+                        : (int * int) option =
+                        let curPos = deps.GetCursorPosition()
 
-                if (dx <> 0 || dy <> 0) && stepIdx <= maxReturnFrames && closeFrames < 8 then
-                    let dist = Math.Sqrt(float (dx * dx + dy * dy))
+                        if curPos <> expectedPos then
+                            Log.Information(
+                                "User mouse movement detected during cursor return glide (expected {ExpectedPos}, actual {ActualPos}). Aborting return to origin.",
+                                expectedPos,
+                                curPos
+                            )
 
-                    let stepMoveX, stepMoveY, nextRemX, nextRemY, nextCloseFrames =
-                        if dist <= stepDistancePx then
-                            let nudgeX = if Math.Abs(dx) <= 2 then Math.Sign(dx) else dx
-                            let nudgeY = if Math.Abs(dy) <= 2 then Math.Sign(dy) else dy
-                            nudgeX, nudgeY, 0.0, 0.0, (closeFrames + 1)
+                            Some curPos
                         else
-                            let targetX = (float dx / dist) * stepDistancePx + remX
-                            let targetY = (float dy / dist) * stepDistancePx + remY
-                            let moveX = int (Math.Round(targetX))
-                            let moveY = int (Math.Round(targetY))
-                            moveX, moveY, (targetX - float moveX), (targetY - float moveY), 0
+                            let curX, curY = curPos
+                            let dx = originX - curX
+                            let dy = originY - curY
 
-                    if stepMoveX <> 0 || stepMoveY <> 0 then
-                        deps.SendRelativeMove(stepMoveX, stepMoveY)
+                            if (dx <> 0 || dy <> 0) && stepIdx <= maxReturnFrames && closeFrames < 8 then
+                                let dist = Math.Sqrt(float (dx * dx + dy * dy))
 
-                    let afterX, afterY = deps.GetCursorPosition()
+                                let stepMoveX, stepMoveY, nextRemX, nextRemY, nextCloseFrames =
+                                    if dist <= stepDistancePx then
+                                        let nudgeX = if Math.Abs(dx) <= 2 then Math.Sign(dx) else dx
+                                        let nudgeY = if Math.Abs(dy) <= 2 then Math.Sign(dy) else dy
+                                        nudgeX, nudgeY, 0.0, 0.0, (closeFrames + 1)
+                                    else
+                                        let targetX = (float dx / dist) * stepDistancePx + remX
+                                        let targetY = (float dy / dist) * stepDistancePx + remY
+                                        let moveX = int (Math.Round(targetX))
+                                        let moveY = int (Math.Round(targetY))
+                                        moveX, moveY, (targetX - float moveX), (targetY - float moveY), 0
 
-                    if (afterX, afterY) <> (originX, originY) then
-                        deps.Sleep frameInterval
-                        returnLoop (stepIdx + 1) nextRemX nextRemY nextCloseFrames
+                                if stepMoveX <> 0 || stepMoveY <> 0 then
+                                    deps.SendRelativeMove(stepMoveX, stepMoveY)
 
-            returnLoop 1 0.0 0.0 0
+                                let afterPos = deps.GetCursorPosition()
 
-        // Final verification step if OS mouse ballistics quantization left a 1-2 px offset
-        let finalX, finalY = deps.GetCursorPosition()
+                                if afterPos <> originPos then
+                                    deps.Sleep frameInterval
+                                    returnLoop (stepIdx + 1) afterPos nextRemX nextRemY nextCloseFrames
+                                else
+                                    None
+                            else
+                                None
 
-        if (finalX, finalY) <> (originX, originY) then
-            deps.RestoreExactPosition(originX, originY)
+                    returnLoop 1 initialReturnPos 0.0 0.0 0
+                else
+                    None
 
-        originX, originY
+            match abortedDuringPhase2 with
+            | Some userPos -> userPos
+            | None ->
+                // Final verification step if OS mouse ballistics quantization left a 1-2 px offset
+                let finalPos = deps.GetCursorPosition()
+
+                if finalPos <> originPos then
+                    deps.RestoreExactPosition(originX, originY)
+
+                originPos
 
     /// Creates a Win32 INPUT structure for a relative mouse move (mouseData = 0, dx, dy).
     let createRelativeMoveInput (dx: int, dy: int) : User32.INPUT =
@@ -323,7 +381,7 @@ module CursorActivity =
         NextDirectionAngle = defaultNextDirectionAngle
     }
 
-    /// Performs smooth cursor activity for 2 seconds within the current screen using SendInput and glides back to its original coordinates.
+    /// Performs brief smooth cursor activity within the current screen using SendInput and glides back to its original coordinates unless aborted by user mouse movement.
     let keepScreenAwake () : int * int =
         try
             Log.Information(
@@ -333,7 +391,7 @@ module CursorActivity =
             )
 
             let finalPos = performActivityWith defaultDeps defaultOptions
-            Log.Debug("Cursor activity completed; cursor restored to {Position}.", finalPos)
+            Log.Debug("Cursor activity finished at {Position}.", finalPos)
             finalPos
         with ex ->
             Log.Error(ex, "Error while performing cursor activity.")

@@ -97,4 +97,3 @@ module AppVersionTests =
         Assert.That(info.SemVer, Is.Not.Empty)
         Assert.That(info.InformationalVersion, Does.Contain("Branch."))
         Assert.That(info.ShortSha.IsSome, Is.True)
-

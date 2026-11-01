@@ -250,6 +250,99 @@ module CursorActivityTests =
         Assert.That(currentPos.Value, Is.EqualTo((600, 450)))
 
     [<Test>]
+    let ``performActivityWith aborts immediately and does not restore origin when user moves mouse during random phase``
+        ()
+        =
+        // Arrange
+        let currentPos = ref (500, 400)
+        let relativeMoves = ResizeArray<int * int>()
+        let restoreCalls = ResizeArray<int * int>()
+        let sleepCount = ref 0
+
+        let deps = {
+            GetCursorPosition = fun () -> currentPos.Value
+            GetScreenBounds = fun _ -> defaultScreenBounds
+            SendRelativeMove =
+                fun (dx, dy) ->
+                    let x, y = currentPos.Value
+                    currentPos.Value <- (x + dx, y + dy)
+                    relativeMoves.Add((dx, dy))
+            RestoreExactPosition =
+                fun pos ->
+                    currentPos.Value <- pos
+                    restoreCalls.Add(pos)
+            Sleep =
+                fun _ ->
+                    sleepCount.Value <- sleepCount.Value + 1
+
+                    if sleepCount.Value = 5 then
+                        // Simulate user moving the physical mouse during frame 5 sleep
+                        currentPos.Value <- (820, 640)
+            NextDirectionAngle = fun () -> 0.0
+        }
+
+        let options = {
+            Duration = TimeSpan.FromSeconds(2.0)
+            FrameInterval = TimeSpan.FromMilliseconds(20.0)
+            DirectionChangeInterval = TimeSpan.FromMilliseconds(400.0)
+            SpeedPxPerSecond = 250.0
+        }
+
+        // Act
+        let finalPos = performActivityWith deps options
+
+        // Assert
+        Assert.That(finalPos, Is.EqualTo((820, 640)))
+        Assert.That(currentPos.Value, Is.EqualTo((820, 640)))
+        Assert.That(relativeMoves.Count, Is.EqualTo(5))
+        Assert.That(restoreCalls, Is.Empty)
+
+    [<Test>]
+    let ``performActivityWith aborts return glide and leaves cursor at user position when user moves mouse during return phase``
+        ()
+        =
+        // Arrange
+        let currentPos = ref (500, 400)
+        let restoreCalls = ResizeArray<int * int>()
+        let sleepCount = ref 0
+
+        let deps = {
+            GetCursorPosition = fun () -> currentPos.Value
+            GetScreenBounds = fun _ -> defaultScreenBounds
+            SendRelativeMove =
+                fun (dx, dy) ->
+                    let x, y = currentPos.Value
+                    currentPos.Value <- (x + dx, y + dy)
+            RestoreExactPosition =
+                fun pos ->
+                    currentPos.Value <- pos
+                    restoreCalls.Add(pos)
+            Sleep =
+                fun _ ->
+                    sleepCount.Value <- sleepCount.Value + 1
+
+                    // 10 frames in Phase 1 (200ms / 20ms); sleep 12 is during Phase 2 return glide
+                    if sleepCount.Value = 12 then
+                        currentPos.Value <- (300, 220)
+            NextDirectionAngle = fun () -> 0.0
+        }
+
+        let options = {
+            Duration = TimeSpan.FromMilliseconds(200.0)
+            FrameInterval = TimeSpan.FromMilliseconds(20.0)
+            DirectionChangeInterval = TimeSpan.FromMilliseconds(200.0)
+            SpeedPxPerSecond = 250.0
+        }
+
+        // Act
+        let finalPos = performActivityWith deps options
+
+        // Assert
+        Assert.That(finalPos, Is.EqualTo((300, 220)))
+        Assert.That(currentPos.Value, Is.EqualTo((300, 220)))
+        Assert.That(restoreCalls, Is.Empty)
+
+    [<Test>]
     let ``createRelativeMoveInput populates MOUSEINPUT dx and dy fields with zero mouseData`` () =
         // Act
         let input = createRelativeMoveInput (15, -25)
@@ -261,8 +354,8 @@ module CursorActivityTests =
         Assert.That(input.mi.dx, Is.EqualTo(15))
         Assert.That(input.mi.dy, Is.EqualTo(-25))
 
-    [<Test; Explicit("Physically moves the mouse cursor on the system for 2 seconds.")>]
-    let ``keepScreenAwake physically moves the cursor for 2 seconds and restores original position`` () =
+    [<Test; Explicit("Physically moves the mouse cursor on the system.")>]
+    let ``keepScreenAwake physically moves the cursor and restores original position`` () =
         // Arrange
         let before = defaultDeps.GetCursorPosition()
 

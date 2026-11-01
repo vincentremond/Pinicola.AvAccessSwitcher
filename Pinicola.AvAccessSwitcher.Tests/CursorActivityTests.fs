@@ -17,21 +17,25 @@ module CursorActivityTests =
 
     [<Test>]
     let ``evaluateCursorIdle initializes tracker on first check without triggering activity`` () =
+        // Arrange
         let now = TimeSpan.FromSeconds(1.0)
-
-        let nextState, shouldTrigger =
-            evaluateCursorIdle IdleThreshold now (100, 200) initialTrackerState
 
         let expected = {
             LastCursorPos = Some(100, 200)
             LastMoveTimestamp = now
         }
 
+        // Act
+        let nextState, shouldTrigger =
+            evaluateCursorIdle IdleThreshold now (100, 200) initialTrackerState
+
+        // Assert
         Assert.That(nextState, Is.EqualTo(expected))
         Assert.That(shouldTrigger, Is.False)
 
     [<Test>]
     let ``evaluateCursorIdle resets timer and does not trigger when cursor position changes`` () =
+        // Arrange
         let priorState = {
             LastCursorPos = Some(100, 200)
             LastMoveTimestamp = TimeSpan.FromSeconds(1.0)
@@ -39,19 +43,22 @@ module CursorActivityTests =
 
         let now = TimeSpan.FromSeconds(150.0)
 
-        let nextState, shouldTrigger =
-            evaluateCursorIdle IdleThreshold now (105, 210) priorState
-
         let expected = {
             LastCursorPos = Some(105, 210)
             LastMoveTimestamp = now
         }
 
+        // Act
+        let nextState, shouldTrigger =
+            evaluateCursorIdle IdleThreshold now (105, 210) priorState
+
+        // Assert
         Assert.That(nextState, Is.EqualTo(expected))
         Assert.That(shouldTrigger, Is.False)
 
     [<Test>]
     let ``evaluateCursorIdle does not trigger when cursor is stationary for less than threshold`` () =
+        // Arrange
         let priorState = {
             LastCursorPos = Some(100, 200)
             LastMoveTimestamp = TimeSpan.FromSeconds(1.0)
@@ -59,14 +66,17 @@ module CursorActivityTests =
 
         let now = TimeSpan.FromMilliseconds(120_999.0)
 
+        // Act
         let nextState, shouldTrigger =
             evaluateCursorIdle IdleThreshold now (100, 200) priorState
 
+        // Assert
         Assert.That(nextState, Is.EqualTo(priorState))
         Assert.That(shouldTrigger, Is.False)
 
     [<Test>]
     let ``evaluateCursorIdle triggers activity and updates timestamp when stationary for at least 2 minutes`` () =
+        // Arrange
         let priorState = {
             LastCursorPos = Some(100, 200)
             LastMoveTimestamp = TimeSpan.FromSeconds(1.0)
@@ -74,19 +84,22 @@ module CursorActivityTests =
 
         let now = TimeSpan.FromSeconds(121.0)
 
-        let nextState, shouldTrigger =
-            evaluateCursorIdle IdleThreshold now (100, 200) priorState
-
         let expected = {
             LastCursorPos = Some(100, 200)
             LastMoveTimestamp = now
         }
 
+        // Act
+        let nextState, shouldTrigger =
+            evaluateCursorIdle IdleThreshold now (100, 200) priorState
+
+        // Assert
         Assert.That(nextState, Is.EqualTo(expected))
         Assert.That(shouldTrigger, Is.True)
 
     [<Test>]
     let ``performActivityWith smoothly moves cursor at configured speed and glides back to origin`` () =
+        // Arrange
         let currentPos = ref (500, 400)
         let relativeMoves = ResizeArray<int * int>()
         let sleepDelays = ResizeArray<TimeSpan>()
@@ -123,13 +136,6 @@ module CursorActivityTests =
             SpeedPxPerSecond = 200.0
         }
 
-        let finalPos = performActivityWith deps options
-
-        Assert.That(finalPos, Is.EqualTo((500, 400)))
-        Assert.That(currentPos.Value, Is.EqualTo((500, 400)))
-        Assert.That(relativeMoves.Count, Is.GreaterThan(100))
-
-        // Verify higher speed produces larger per-frame deltas
         let fastMoves = ResizeArray<int * int>()
 
         let fastDeps = {
@@ -141,7 +147,14 @@ module CursorActivityTests =
                         fastMoves.Add((dx, dy))
         }
 
+        // Act
+        let finalPos = performActivityWith deps options
         let _ = performActivityWith fastDeps { options with SpeedPxPerSecond = 600.0 }
+
+        // Assert
+        Assert.That(finalPos, Is.EqualTo((500, 400)))
+        Assert.That(currentPos.Value, Is.EqualTo((500, 400)))
+        Assert.That(relativeMoves.Count, Is.GreaterThan(100))
 
         let avgSlowStep =
             relativeMoves
@@ -155,7 +168,7 @@ module CursorActivityTests =
 
     [<Test>]
     let ``performActivityWith keeps cursor strictly inside its current screen bounds and bounces off edges`` () =
-        // Start near the top-left corner of a secondary monitor at (1920, 0) .. (3840, 1080)
+        // Arrange: start near the top-left corner of a secondary monitor at (1920, 0) .. (3840, 1080)
         let secondaryBounds = {
             Left = 1920
             Top = 0
@@ -188,8 +201,10 @@ module CursorActivityTests =
             SpeedPxPerSecond = 300.0
         }
 
+        // Act
         let finalPos = performActivityWith deps options
 
+        // Assert
         Assert.That(finalPos, Is.EqualTo((1925, 5)))
         Assert.That(currentPos.Value, Is.EqualTo((1925, 5)))
         Assert.That(visitedPositions, Is.Not.Empty)
@@ -202,6 +217,7 @@ module CursorActivityTests =
 
     [<Test>]
     let ``performActivityWith restores exact origin when OS pointer ballistics scales relative moves`` () =
+        // Arrange
         let currentPos = ref (600, 450)
 
         let deps = {
@@ -226,15 +242,19 @@ module CursorActivityTests =
             SpeedPxPerSecond = 250.0
         }
 
+        // Act
         let finalPos = performActivityWith deps options
 
+        // Assert
         Assert.That(finalPos, Is.EqualTo((600, 450)))
         Assert.That(currentPos.Value, Is.EqualTo((600, 450)))
 
     [<Test>]
     let ``createRelativeMoveInput populates MOUSEINPUT dx and dy fields with zero mouseData`` () =
+        // Act
         let input = createRelativeMoveInput (15, -25)
 
+        // Assert
         Assert.That(input.``type``, Is.EqualTo(Vanara.PInvoke.User32.INPUTTYPE.INPUT_MOUSE))
         Assert.That(input.mi.dwFlags, Is.EqualTo(Vanara.PInvoke.User32.MOUSEEVENTF.MOUSEEVENTF_MOVE))
         Assert.That(input.mi.mouseData, Is.EqualTo(0))
@@ -243,8 +263,13 @@ module CursorActivityTests =
 
     [<Test; Explicit("Physically moves the mouse cursor on the system for 2 seconds.")>]
     let ``keepScreenAwake physically moves the cursor for 2 seconds and restores original position`` () =
+        // Arrange
         let before = defaultDeps.GetCursorPosition()
+
+        // Act
         let returned = keepScreenAwake ()
         let after = defaultDeps.GetCursorPosition()
+
+        // Assert
         Assert.That(returned, Is.EqualTo(before))
         Assert.That(after, Is.EqualTo(before))

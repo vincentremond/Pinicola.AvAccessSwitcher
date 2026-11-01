@@ -17,16 +17,21 @@ module KvmDetectorTests =
     let ``isMatchingDevice identifies AV Access KVM devices correctly``
         (deviceId: string, name: string, expected: bool)
         =
+        // Arrange
         let device = {
             DeviceId = deviceId
             Name = name
         }
 
+        // Act
         let actual = isMatchingDevice device
+
+        // Assert
         Assert.That(actual, Is.EqualTo(expected))
 
     [<Test>]
     let ``isKvmConnectedWith returns true when at least one device matches`` () =
+        // Arrange
         let devices () =
             seq {
                 {
@@ -40,10 +45,15 @@ module KvmDetectorTests =
                 }
             }
 
-        Assert.That(isKvmConnectedWith devices, Is.True)
+        // Act
+        let actual = isKvmConnectedWith devices
+
+        // Assert
+        Assert.That(actual, Is.True)
 
     [<Test>]
     let ``isKvmConnectedWith returns false when no devices match`` () =
+        // Arrange
         let devices () =
             seq {
                 {
@@ -57,16 +67,31 @@ module KvmDetectorTests =
                 }
             }
 
-        Assert.That(isKvmConnectedWith devices, Is.False)
+        // Act
+        let actual = isKvmConnectedWith devices
+
+        // Assert
+        Assert.That(actual, Is.False)
 
     [<Test>]
     let ``isKvmConnectedWith returns false when device list is empty`` () =
+        // Arrange
         let devices () = Seq.empty
-        Assert.That(isKvmConnectedWith devices, Is.False)
+
+        // Act
+        let actual = isKvmConnectedWith devices
+
+        // Assert
+        Assert.That(actual, Is.False)
 
     [<Test>]
     let ``isKvmConnectedWith returns false when device query throws`` () =
+        // Arrange
         let devices () : PnpDeviceInfo seq =
             raise (InvalidOperationException("WMI unavailable"))
 
-        Assert.That(isKvmConnectedWith devices, Is.False)
+        // Act
+        let actual = isKvmConnectedWith devices
+
+        // Assert
+        Assert.That(actual, Is.False)

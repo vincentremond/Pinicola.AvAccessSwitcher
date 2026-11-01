@@ -10,30 +10,42 @@ module AppSettingsTests =
 
     [<Test>]
     let ``serialize and deserialize round-trip UserSettings in camelCase YAML`` () =
+        // Arrange
         let settings = {
             AutoExtendOnReconnect = false
             KeepScreenAwake = true
         }
 
+        // Act
         let yaml = AppSettings.serialize settings
+        let roundTripped = AppSettings.deserialize yaml
 
+        // Assert
         Assert.That(yaml, Does.Contain("autoExtendOnReconnect: false"))
         Assert.That(yaml, Does.Contain("keepScreenAwake: true"))
-
-        let roundTripped = AppSettings.deserialize yaml
         Assert.That(roundTripped, Is.EqualTo(settings))
 
-    [<Test>]
-    let ``deserialize returns defaultSettings when YAML is empty or invalid`` () =
-        Assert.That(AppSettings.deserialize "", Is.EqualTo(AppSettings.defaultSettings))
-        Assert.That(AppSettings.deserialize "   \n  ", Is.EqualTo(AppSettings.defaultSettings))
-        Assert.That(AppSettings.deserialize "::invalid::yaml::[", Is.EqualTo(AppSettings.defaultSettings))
+    [<TestCase("")>]
+    [<TestCase("   \n  ")>]
+    [<TestCase("::invalid::yaml::[")>]
+    let ``deserialize returns defaultSettings when YAML is empty or invalid`` (yaml: string) =
+        // Act
+        let actual = AppSettings.deserialize yaml
+
+        // Assert
+        Assert.That(actual, Is.EqualTo(AppSettings.defaultSettings))
 
     [<Test>]
     let ``deserialize falls back to default values for missing keys`` () =
+        // Arrange
         let onlyKeepAwake = "keepScreenAwake: true\n"
-        let parsed1 = AppSettings.deserialize onlyKeepAwake
+        let onlyAutoExtend = "autoExtendOnReconnect: false\n"
 
+        // Act
+        let parsed1 = AppSettings.deserialize onlyKeepAwake
+        let parsed2 = AppSettings.deserialize onlyAutoExtend
+
+        // Assert
         Assert.That(
             parsed1,
             Is.EqualTo(
@@ -43,9 +55,6 @@ module AppSettingsTests =
                 }
             )
         )
-
-        let onlyAutoExtend = "autoExtendOnReconnect: false\n"
-        let parsed2 = AppSettings.deserialize onlyAutoExtend
 
         Assert.That(
             parsed2,
@@ -59,24 +68,27 @@ module AppSettingsTests =
 
     [<Test>]
     let ``saveTo and loadFrom persist and reload settings YAML file`` () =
+        // Arrange
         let tempDir =
             Path.Combine(Path.GetTempPath(), $"Pinicola.AvAccessSwitcher.Tests.{Guid.NewGuid():N}")
 
         let filePath = Path.Combine(tempDir, "settings.yaml")
 
+        let customSettings = {
+            AutoExtendOnReconnect = false
+            KeepScreenAwake = true
+        }
+
         try
-            Assert.That(AppSettings.loadFrom filePath, Is.EqualTo(AppSettings.defaultSettings))
-
-            let customSettings = {
-                AutoExtendOnReconnect = false
-                KeepScreenAwake = true
-            }
-
+            // Act
+            let beforeSave = AppSettings.loadFrom filePath
             AppSettings.saveTo filePath customSettings
+            let afterSave = AppSettings.loadFrom filePath
 
+            // Assert
+            Assert.That(beforeSave, Is.EqualTo(AppSettings.defaultSettings))
             Assert.That(File.Exists(filePath), Is.True)
-            Assert.That(AppSettings.loadFrom filePath, Is.EqualTo(customSettings))
+            Assert.That(afterSave, Is.EqualTo(customSettings))
         finally
             if Directory.Exists(tempDir) then
                 Directory.Delete(tempDir, true)
-

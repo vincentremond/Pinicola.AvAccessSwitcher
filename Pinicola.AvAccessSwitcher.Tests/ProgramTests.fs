@@ -9,44 +9,65 @@ module ProgramTests =
 
     [<Test>]
     let ``parseArgs returns false for empty arguments`` () =
-        let options = parseArgs [||]
+        // Arrange
+        let argv = [||]
+
+        // Act
+        let options = parseArgs argv
+
+        // Assert
         Assert.That(options.AllowMultipleInstances, Is.False)
 
     [<TestCase("--allow-multiple")>]
     [<TestCase("--ALLOW-MULTIPLE")>]
     [<TestCase("--Allow-Multiple")>]
     let ``parseArgs recognizes --allow-multiple case-insensitively`` (flag: string) =
-        let options =
-            parseArgs [|
-                "--other"
-                flag
-            |]
+        // Arrange
+        let argv = [|
+            "--other"
+            flag
+        |]
 
+        // Act
+        let options = parseArgs argv
+
+        // Assert
         Assert.That(options.AllowMultipleInstances, Is.True)
 
     [<Test>]
     let ``parseArgs returns false when only unrelated arguments are present`` () =
-        let options =
-            parseArgs [|
-                "--verbose"
-                "-m"
-            |]
+        // Arrange
+        let argv = [|
+            "--verbose"
+            "-m"
+        |]
 
+        // Act
+        let options = parseArgs argv
+
+        // Assert
         Assert.That(options.AllowMultipleInstances, Is.False)
 
     [<Test; Explicit("Creates a real OS named mutex on the system.")>]
     let ``acquireSingleInstance acquires mutex and detects second instance until disposed`` () =
+        // Arrange
         let mutexName = sprintf @"Local\Pinicola.AvAccessSwitcher.Test.%O" (Guid.NewGuid())
 
-        match acquireSingleInstance mutexName with
+        // Act
+        let firstAttempt = acquireSingleInstance mutexName
+
+        // Assert
+        match firstAttempt with
         | Acquired firstHandle ->
             try
+                // Act & Assert: second instance while held
                 match acquireSingleInstance mutexName with
                 | AlreadyRunning -> ()
                 | other -> Assert.Fail(sprintf "Expected AlreadyRunning, got %A" other)
             finally
                 firstHandle.Dispose()
 
+            // Act & Assert: reacquire after disposal
             match acquireSingleInstance mutexName with
             | Acquired reacquiredHandle -> reacquiredHandle.Dispose()
             | other -> Assert.Fail(sprintf "Expected Acquired after disposal, got %A" other)
@@ -55,6 +76,7 @@ module ProgramTests =
 
     [<Test>]
     let ``execute bypasses single-instance lock when --allow-multiple is passed`` () =
+        // Arrange
         let events = ResizeArray<string>()
 
         let deps = {
@@ -66,13 +88,16 @@ module ProgramTests =
             RunApplication = fun () -> events.Add("run")
         }
 
+        // Act
         let exitCode = execute deps [| "--allow-multiple" |]
 
+        // Assert
         Assert.That(exitCode, Is.EqualTo(0))
         Assert.That(events, Is.EqualTo(box [| "run" |]))
 
     [<Test>]
     let ``execute runs application and disposes lock when single-instance lock is acquired`` () =
+        // Arrange
         let events = ResizeArray<string>()
 
         let handle =
@@ -89,8 +114,10 @@ module ProgramTests =
             RunApplication = fun () -> events.Add("run")
         }
 
+        // Act
         let exitCode = execute deps [||]
 
+        // Assert
         Assert.That(exitCode, Is.EqualTo(0))
 
         Assert.That(
@@ -106,6 +133,7 @@ module ProgramTests =
 
     [<Test>]
     let ``execute notifies and exits without running application when already running`` () =
+        // Arrange
         let events = ResizeArray<string>()
 
         let deps = {
@@ -117,8 +145,10 @@ module ProgramTests =
             RunApplication = fun () -> events.Add("run")
         }
 
+        // Act
         let exitCode = execute deps [||]
 
+        // Assert
         Assert.That(exitCode, Is.EqualTo(0))
 
         Assert.That(
@@ -133,6 +163,7 @@ module ProgramTests =
 
     [<Test>]
     let ``execute falls back to running application when mutex acquisition fails`` () =
+        // Arrange
         let events = ResizeArray<string>()
 
         let deps = {
@@ -144,8 +175,10 @@ module ProgramTests =
             RunApplication = fun () -> events.Add("run")
         }
 
+        // Act
         let exitCode = execute deps [||]
 
+        // Assert
         Assert.That(exitCode, Is.EqualTo(0))
 
         Assert.That(

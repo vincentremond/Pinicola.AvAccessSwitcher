@@ -1,6 +1,7 @@
 namespace Pinicola.AvAccessSwitcher.Tests
 
 open System
+open System.Diagnostics
 open NUnit.Framework
 open Pinicola.AvAccessSwitcher
 
@@ -159,7 +160,7 @@ module CursorActivityTests =
         // Assert
         Assert.That(finalPos, Is.EqualTo((500, 400)))
         Assert.That(currentPos.Value, Is.EqualTo((500, 400)))
-        Assert.That(relativeMoves.Count, Is.GreaterThan(100))
+        Assert.That(relativeMoves.Count, Is.GreaterThan(50))
 
         let avgSlowStep =
             relativeMoves
@@ -326,8 +327,8 @@ module CursorActivityTests =
                 fun _ ->
                     sleepCount.Value <- sleepCount.Value + 1
 
-                    // 10 frames in Phase 1 (200ms / 20ms); sleep 12 is during Phase 2 return glide
-                    if sleepCount.Value = 12 then
+                    // 5 frames in Phase 1 (100ms / 20ms); sleep 7 is during Phase 2 return glide
+                    if sleepCount.Value = 7 then
                         currentPos.Value <- (300, 220)
             NextDirectionAngle = fun () -> 0.0
         }
@@ -363,11 +364,18 @@ module CursorActivityTests =
     let ``keepScreenAwake physically moves the cursor and restores original position`` () =
         // Arrange
         let before = CursorActivity.getCursorPosition ()
+        let stopwatch = Stopwatch.StartNew()
 
         // Act
         let returned = CursorActivity.keepScreenAwake ()
+        stopwatch.Stop()
         let after = CursorActivity.getCursorPosition ()
 
         // Assert
         Assert.That(returned, Is.EqualTo(before))
         Assert.That(after, Is.EqualTo(before))
+
+        Assert.That(
+            stopwatch.Elapsed,
+            Is.EqualTo(CursorActivity.ActivityDuration).Within(TimeSpan.FromMilliseconds(150.0))
+        )

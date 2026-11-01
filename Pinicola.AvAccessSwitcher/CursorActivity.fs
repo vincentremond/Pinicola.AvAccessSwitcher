@@ -13,7 +13,7 @@ module CursorActivity =
 
     let IdleThreshold = 2.0<Minute> |> Minute.toTimeSpan
 
-    let private ActivityDuration = 400.0<Millisecond> |> Millisecond.toTimeSpan
+    let internal ActivityDuration = 400.0<Millisecond> |> Millisecond.toTimeSpan
 
     let private FramesPerMillisecond = 60.0<Frame / Second> / millisecondPerSecond
 
@@ -168,7 +168,7 @@ module CursorActivity =
                 TimeSpan.FromMilliseconds(1.0)
 
         let totalFrames =
-            max 0 (int (Math.Round(options.Duration.TotalMilliseconds / frameInterval.TotalMilliseconds)))
+            max 0 (int (Math.Round((options.Duration.TotalMilliseconds / 2.0) / frameInterval.TotalMilliseconds)))
 
         let framesPerDirection =
             max

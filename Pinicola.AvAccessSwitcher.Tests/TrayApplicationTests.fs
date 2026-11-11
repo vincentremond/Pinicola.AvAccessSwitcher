@@ -222,22 +222,91 @@ module TrayApplicationTests =
             Is.EqualTo(box [| ("Display Switcher", "Manually set display to Extend displays.") |])
         )
 
-    [<TestCase(true, true, "Started monitoring KVM (Display is ACTIVE on this PC).")>]
-    [<TestCase(false, true, "Started monitoring KVM (Display is SWITCHED AWAY).")>]
-    [<TestCase(false, false, "Started monitoring KVM (Dock is UNPLUGGED).")>]
-    let ``Initial CheckStatus updates UI and shows startup toast without changing topology``
-        (isKvmConnected: bool, isExternalDisplayConnected: bool, expectedMsg: string)
+    [<TestCase(true, "Started monitoring KVM (Display is ACTIVE on this PC. Display set to Extend displays).")>]
+    [<TestCase(false, "Started monitoring KVM (Display is ACTIVE on this PC. Failed to set topology).")>]
+    let ``Initial CheckStatus when Active with AutoExtend enabled applies Extend topology``
+        (topologySuccess: bool, expectedMsg: string)
         =
         // Arrange
-        let harness = createHarness isKvmConnected isExternalDisplayConnected true
-
-        let expectedDockState =
-            TrayStateLogic.resolveDockState isKvmConnected isExternalDisplayConnected
+        let harness = createHarness true true topologySuccess
 
         let expectedState =
             Some {
                 TrayStateLogic.initialState with
-                    LastDockState = Some expectedDockState
+                    LastDockState = Some DockState.Active
+                    AutoExtendOnReconnect = true
+            }
+
+        // Act
+        let result =
+            TrayStateLogic.step harness.Dependencies TrayStateLogic.initialState (CheckStatus false)
+
+        // Assert
+        Assert.That(result, Is.EqualTo(expectedState))
+        Assert.That(harness.AppliedTopologies, Is.EqualTo(box [| NativeDisplay.DisplayTopology.Extend |]))
+        Assert.That(harness.UiStates, Is.EqualTo(box [| DockState.Active |]))
+        Assert.That(harness.Toasts, Is.EqualTo(box [| ("AV Access Switcher Started", expectedMsg) |]))
+
+    [<Test>]
+    let ``Initial CheckStatus when Active with AutoExtend disabled does not change topology`` () =
+        // Arrange
+        let harness = createHarness true true true
+
+        let initialDisabled = { TrayStateLogic.initialState with AutoExtendOnReconnect = false }
+
+        let expectedState =
+            Some { initialDisabled with LastDockState = Some DockState.Active }
+
+        // Act
+        let result =
+            TrayStateLogic.step harness.Dependencies initialDisabled (CheckStatus false)
+
+        // Assert
+        Assert.That(result, Is.EqualTo(expectedState))
+        Assert.That(harness.AppliedTopologies, Is.Empty)
+        Assert.That(harness.UiStates, Is.EqualTo(box [| DockState.Active |]))
+
+        Assert.That(
+            harness.Toasts,
+            Is.EqualTo(
+                box [| ("AV Access Switcher Started", "Started monitoring KVM (Display is ACTIVE on this PC).") |]
+            )
+        )
+
+    [<TestCase(true, "Started monitoring KVM (Display is SWITCHED AWAY. Display set to Show only on 1).")>]
+    [<TestCase(false, "Started monitoring KVM (Display is SWITCHED AWAY. Failed to set topology).")>]
+    let ``Initial CheckStatus when SwitchedAway applies ShowOnlyInternal topology``
+        (topologySuccess: bool, expectedMsg: string)
+        =
+        // Arrange
+        let harness = createHarness false true topologySuccess
+
+        let expectedState =
+            Some {
+                TrayStateLogic.initialState with
+                    LastDockState = Some DockState.SwitchedAway
+                    AutoExtendOnReconnect = true
+            }
+
+        // Act
+        let result =
+            TrayStateLogic.step harness.Dependencies TrayStateLogic.initialState (CheckStatus false)
+
+        // Assert
+        Assert.That(result, Is.EqualTo(expectedState))
+        Assert.That(harness.AppliedTopologies, Is.EqualTo(box [| NativeDisplay.DisplayTopology.ShowOnlyInternal |]))
+        Assert.That(harness.UiStates, Is.EqualTo(box [| DockState.SwitchedAway |]))
+        Assert.That(harness.Toasts, Is.EqualTo(box [| ("AV Access Switcher Started", expectedMsg) |]))
+
+    [<Test>]
+    let ``Initial CheckStatus when Unplugged updates UI without changing topology`` () =
+        // Arrange
+        let harness = createHarness false false true
+
+        let expectedState =
+            Some {
+                TrayStateLogic.initialState with
+                    LastDockState = Some DockState.Unplugged
                     AutoExtendOnReconnect = true
             }
 
@@ -248,8 +317,12 @@ module TrayApplicationTests =
         // Assert
         Assert.That(result, Is.EqualTo(expectedState))
         Assert.That(harness.AppliedTopologies, Is.Empty)
-        Assert.That(harness.UiStates, Is.EqualTo(box [| expectedDockState |]))
-        Assert.That(harness.Toasts, Is.EqualTo(box [| ("AV Access Switcher Started", expectedMsg) |]))
+        Assert.That(harness.UiStates, Is.EqualTo(box [| DockState.Unplugged |]))
+
+        Assert.That(
+            harness.Toasts,
+            Is.EqualTo(box [| ("AV Access Switcher Started", "Started monitoring KVM (Dock is UNPLUGGED).") |])
+        )
 
     [<TestCase(true, "KVM switched to other PC. Display set to Show only on 1 (Laptop Screen).")>]
     [<TestCase(false, "KVM switched to other PC. (Failed to set topology).")>]

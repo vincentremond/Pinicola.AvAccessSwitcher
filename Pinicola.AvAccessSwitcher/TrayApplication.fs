@@ -169,8 +169,23 @@ module internal TrayStateLogic =
 
                 let statusMsg =
                     match currentDockState with
-                    | DockState.Active -> "Started monitoring KVM (Display is ACTIVE on this PC)."
-                    | DockState.SwitchedAway -> "Started monitoring KVM (Display is SWITCHED AWAY)."
+                    | DockState.Active ->
+                        if stateAfterIdleCheck.AutoExtendOnReconnect then
+                            let applied = deps.SetTopology NativeDisplay.DisplayTopology.Extend
+
+                            if applied then
+                                "Started monitoring KVM (Display is ACTIVE on this PC. Display set to Extend displays)."
+                            else
+                                "Started monitoring KVM (Display is ACTIVE on this PC. Failed to set topology)."
+                        else
+                            "Started monitoring KVM (Display is ACTIVE on this PC)."
+                    | DockState.SwitchedAway ->
+                        let applied = deps.SetTopology NativeDisplay.DisplayTopology.ShowOnlyInternal
+
+                        if applied then
+                            "Started monitoring KVM (Display is SWITCHED AWAY. Display set to Show only on 1)."
+                        else
+                            "Started monitoring KVM (Display is SWITCHED AWAY. Failed to set topology)."
                     | DockState.Unplugged -> "Started monitoring KVM (Dock is UNPLUGGED)."
 
                 deps.ShowToast "AV Access Switcher Started" statusMsg

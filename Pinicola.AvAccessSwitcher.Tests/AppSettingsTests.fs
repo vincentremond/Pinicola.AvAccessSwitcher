@@ -9,21 +9,77 @@ open Pinicola.AvAccessSwitcher
 module AppSettingsTests =
 
     [<Test>]
-    let ``serialize and deserialize round-trip UserSettings in camelCase YAML`` () =
+    let ``serialize and deserialize round-trip all KeepScreenAwakeMode values in camelCase YAML`` () =
         // Arrange
-        let settings = {
+        let settingsOff = {
             AutoExtendOnReconnect = false
-            KeepScreenAwake = true
+            KeepScreenAwake = KeepScreenAwakeMode.Off
+        }
+
+        let settingsWhenDocked = {
+            AutoExtendOnReconnect = true
+            KeepScreenAwake = KeepScreenAwakeMode.WhenDocked
+        }
+
+        let settingsAlways = {
+            AutoExtendOnReconnect = false
+            KeepScreenAwake = KeepScreenAwakeMode.Always
         }
 
         // Act
-        let yaml = AppSettings.serialize settings
-        let roundTripped = AppSettings.deserialize yaml
+        let yamlOff = AppSettings.serialize settingsOff
+        let yamlWhenDocked = AppSettings.serialize settingsWhenDocked
+        let yamlAlways = AppSettings.serialize settingsAlways
+
+        let roundTrippedOff = AppSettings.deserialize yamlOff
+        let roundTrippedWhenDocked = AppSettings.deserialize yamlWhenDocked
+        let roundTrippedAlways = AppSettings.deserialize yamlAlways
 
         // Assert
-        Assert.That(yaml, Does.Contain("autoExtendOnReconnect: false"))
-        Assert.That(yaml, Does.Contain("keepScreenAwake: true"))
-        Assert.That(roundTripped, Is.EqualTo(settings))
+        Assert.That(yamlOff, Does.Contain("autoExtendOnReconnect: false"))
+        Assert.That(yamlWhenDocked, Does.Contain("keepScreenAwake: whenDocked"))
+        Assert.That(yamlAlways, Does.Contain("keepScreenAwake: always"))
+        Assert.That(roundTrippedOff, Is.EqualTo(settingsOff))
+        Assert.That(roundTrippedWhenDocked, Is.EqualTo(settingsWhenDocked))
+        Assert.That(roundTrippedAlways, Is.EqualTo(settingsAlways))
+
+    [<TestCase("keepScreenAwake: true\n", true)>]
+    [<TestCase("keepScreenAwake: false\n", false)>]
+    let ``deserialize migrates legacy boolean keepScreenAwake values`` (yaml: string, expectedAlways: bool) =
+        // Arrange
+        let expectedMode =
+            if expectedAlways then
+                KeepScreenAwakeMode.Always
+            else
+                KeepScreenAwakeMode.Off
+
+        // Act
+        let actual = AppSettings.deserialize yaml
+
+        // Assert
+        Assert.That(actual.KeepScreenAwake, Is.EqualTo(expectedMode))
+
+    [<TestCase("keepScreenAwake: off\n", "Off")>]
+    [<TestCase("keepScreenAwake: 'off'\n", "Off")>]
+    [<TestCase("keepScreenAwake: whenDocked\n", "WhenDocked")>]
+    [<TestCase("keepScreenAwake: WHENDOCKED\n", "WhenDocked")>]
+    [<TestCase("keepScreenAwake: always\n", "Always")>]
+    [<TestCase("keepScreenAwake: invalidValue\n", "Off")>]
+    let ``deserialize parses KeepScreenAwakeMode string variants and falls back to Off for invalid values``
+        (yaml: string, expectedCase: string)
+        =
+        // Arrange
+        let expectedMode =
+            match expectedCase with
+            | "WhenDocked" -> KeepScreenAwakeMode.WhenDocked
+            | "Always" -> KeepScreenAwakeMode.Always
+            | _ -> KeepScreenAwakeMode.Off
+
+        // Act
+        let actual = AppSettings.deserialize yaml
+
+        // Assert
+        Assert.That(actual.KeepScreenAwake, Is.EqualTo(expectedMode))
 
     [<TestCase("")>]
     [<TestCase("   \n  ")>]
@@ -38,7 +94,7 @@ module AppSettingsTests =
     [<Test>]
     let ``deserialize falls back to default values for missing keys`` () =
         // Arrange
-        let onlyKeepAwake = "keepScreenAwake: true\n"
+        let onlyKeepAwake = "keepScreenAwake: whenDocked\n"
         let onlyAutoExtend = "autoExtendOnReconnect: false\n"
 
         // Act
@@ -51,7 +107,7 @@ module AppSettingsTests =
             Is.EqualTo(
                 {
                     AutoExtendOnReconnect = true
-                    KeepScreenAwake = true
+                    KeepScreenAwake = KeepScreenAwakeMode.WhenDocked
                 }
             )
         )
@@ -61,7 +117,7 @@ module AppSettingsTests =
             Is.EqualTo(
                 {
                     AutoExtendOnReconnect = false
-                    KeepScreenAwake = false
+                    KeepScreenAwake = KeepScreenAwakeMode.Off
                 }
             )
         )
@@ -76,7 +132,7 @@ module AppSettingsTests =
 
         let customSettings = {
             AutoExtendOnReconnect = false
-            KeepScreenAwake = true
+            KeepScreenAwake = KeepScreenAwakeMode.WhenDocked
         }
 
         try

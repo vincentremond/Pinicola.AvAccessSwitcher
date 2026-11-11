@@ -75,11 +75,26 @@ module TrayApplicationTests =
         Assert.That(bothTrue, Is.EqualTo(DockState.Active))
 
     [<Test>]
+    let ``isKeepAwakeActive evaluates all KeepScreenAwakeMode and DockState combinations`` () =
+        // Act & Assert
+        Assert.That(TrayStateLogic.isKeepAwakeActive KeepScreenAwakeMode.Off DockState.Unplugged, Is.False)
+        Assert.That(TrayStateLogic.isKeepAwakeActive KeepScreenAwakeMode.Off DockState.SwitchedAway, Is.False)
+        Assert.That(TrayStateLogic.isKeepAwakeActive KeepScreenAwakeMode.Off DockState.Active, Is.False)
+
+        Assert.That(TrayStateLogic.isKeepAwakeActive KeepScreenAwakeMode.WhenDocked DockState.Unplugged, Is.False)
+        Assert.That(TrayStateLogic.isKeepAwakeActive KeepScreenAwakeMode.WhenDocked DockState.SwitchedAway, Is.True)
+        Assert.That(TrayStateLogic.isKeepAwakeActive KeepScreenAwakeMode.WhenDocked DockState.Active, Is.True)
+
+        Assert.That(TrayStateLogic.isKeepAwakeActive KeepScreenAwakeMode.Always DockState.Unplugged, Is.True)
+        Assert.That(TrayStateLogic.isKeepAwakeActive KeepScreenAwakeMode.Always DockState.SwitchedAway, Is.True)
+        Assert.That(TrayStateLogic.isKeepAwakeActive KeepScreenAwakeMode.Always DockState.Active, Is.True)
+
+    [<Test>]
     let ``createInitialState populates AutoExtendOnReconnect and KeepScreenAwake from UserSettings`` () =
         // Arrange
         let settings = {
             AutoExtendOnReconnect = false
-            KeepScreenAwake = true
+            KeepScreenAwake = KeepScreenAwakeMode.WhenDocked
         }
 
         // Act
@@ -87,7 +102,7 @@ module TrayApplicationTests =
 
         // Assert
         Assert.That(state.AutoExtendOnReconnect, Is.False)
-        Assert.That(state.KeepScreenAwake, Is.True)
+        Assert.That(state.KeepScreenAwake, Is.EqualTo(KeepScreenAwakeMode.WhenDocked))
         Assert.That(state.LastDockState, Is.EqualTo(None))
 
     [<Test>]
@@ -123,39 +138,89 @@ module TrayApplicationTests =
                 box [|
                     {
                         AutoExtendOnReconnect = false
-                        KeepScreenAwake = false
+                        KeepScreenAwake = KeepScreenAwakeMode.Off
                     }
                 |]
             )
         )
 
     [<Test>]
-    let ``SetKeepScreenAwake initializes and clears CursorIdleTracker and saves settings`` () =
+    let ``SetKeepScreenAwake initializes and clears CursorIdleTracker based on mode and dock state and saves settings``
+        ()
+        =
         // Arrange
         let harness = createHarness true true true
         harness.Timestamp.Value <- TimeSpan.FromSeconds(5.0)
         harness.CursorPos.Value <- (250, 350)
 
-        let expectedEnabled =
-            Some {
-                TrayStateLogic.initialState with
-                    KeepScreenAwake = true
-                    CursorIdleTracker = {
-                        CursorActivity.LastCursorPos = Some(250, 350)
-                        CursorActivity.LastMoveTimestamp = TimeSpan.FromSeconds(5.0)
-                    }
-            }
+        let unpluggedState = { TrayStateLogic.initialState with LastDockState = Some DockState.Unplugged }
+        let dockedState = { TrayStateLogic.initialState with LastDockState = Some DockState.SwitchedAway }
+
+        let activeTracker: CursorActivity.IdleTrackerState = {
+            LastCursorPos = Some(250, 350)
+            LastMoveTimestamp = TimeSpan.FromSeconds(5.0)
+        }
 
         // Act
-        let enabledResult =
-            TrayStateLogic.step harness.Dependencies TrayStateLogic.initialState (SetKeepScreenAwake true)
+        let alwaysWhenUnplugged =
+            TrayStateLogic.step harness.Dependencies unpluggedState (SetKeepScreenAwake KeepScreenAwakeMode.Always)
 
-        let disabledResult =
-            TrayStateLogic.step harness.Dependencies enabledResult.Value (SetKeepScreenAwake false)
+        let whenDockedWhileUnplugged =
+            TrayStateLogic.step harness.Dependencies unpluggedState (SetKeepScreenAwake KeepScreenAwakeMode.WhenDocked)
+
+        let whenDockedWhileDocked =
+            TrayStateLogic.step harness.Dependencies dockedState (SetKeepScreenAwake KeepScreenAwakeMode.WhenDocked)
+
+        let offResult =
+            TrayStateLogic.step
+                harness.Dependencies
+                whenDockedWhileDocked.Value
+                (SetKeepScreenAwake KeepScreenAwakeMode.Off)
 
         // Assert
-        Assert.That(enabledResult, Is.EqualTo(expectedEnabled))
-        Assert.That(disabledResult, Is.EqualTo(Some TrayStateLogic.initialState))
+        Assert.That(
+            alwaysWhenUnplugged,
+            Is.EqualTo(
+                Some {
+                    unpluggedState with
+                        KeepScreenAwake = KeepScreenAwakeMode.Always
+                        CursorIdleTracker = activeTracker
+                }
+            )
+        )
+
+        Assert.That(
+            whenDockedWhileUnplugged,
+            Is.EqualTo(
+                Some {
+                    unpluggedState with
+                        KeepScreenAwake = KeepScreenAwakeMode.WhenDocked
+                        CursorIdleTracker = CursorActivity.initialTrackerState
+                }
+            )
+        )
+
+        Assert.That(
+            whenDockedWhileDocked,
+            Is.EqualTo(
+                Some {
+                    dockedState with
+                        KeepScreenAwake = KeepScreenAwakeMode.WhenDocked
+                        CursorIdleTracker = activeTracker
+                }
+            )
+        )
+
+        Assert.That(
+            offResult,
+            Is.EqualTo(
+                Some {
+                    dockedState with
+                        KeepScreenAwake = KeepScreenAwakeMode.Off
+                        CursorIdleTracker = CursorActivity.initialTrackerState
+                }
+            )
+        )
 
         Assert.That(
             harness.SavedSettings,
@@ -163,11 +228,19 @@ module TrayApplicationTests =
                 box [|
                     {
                         AutoExtendOnReconnect = true
-                        KeepScreenAwake = true
+                        KeepScreenAwake = KeepScreenAwakeMode.Always
                     }
                     {
                         AutoExtendOnReconnect = true
-                        KeepScreenAwake = false
+                        KeepScreenAwake = KeepScreenAwakeMode.WhenDocked
+                    }
+                    {
+                        AutoExtendOnReconnect = true
+                        KeepScreenAwake = KeepScreenAwakeMode.WhenDocked
+                    }
+                    {
+                        AutoExtendOnReconnect = true
+                        KeepScreenAwake = KeepScreenAwakeMode.Off
                     }
                 |]
             )
@@ -543,18 +616,17 @@ module TrayApplicationTests =
         Assert.That(harness.Toasts.Count, Is.EqualTo(1))
 
     [<Test>]
-    let ``CheckStatus triggers cursor activity when KeepScreenAwake is enabled and cursor has not moved for 2 minutes``
-        ()
-        =
+    let ``CheckStatus triggers cursor activity when KeepScreenAwake is Always even while Unplugged`` () =
         // Arrange
-        let harness = createHarness true true true
+        let harness = createHarness false false true
         harness.Timestamp.Value <- TimeSpan.FromSeconds(10.0)
         harness.CursorPos.Value <- (400, 300)
 
-        let initialActive = { TrayStateLogic.initialState with LastDockState = Some DockState.Active }
+        let initialUnplugged = { TrayStateLogic.initialState with LastDockState = Some DockState.Unplugged }
 
         let stateWithKeepAwake =
-            (TrayStateLogic.step harness.Dependencies initialActive (SetKeepScreenAwake true)).Value
+            (TrayStateLogic.step harness.Dependencies initialUnplugged (SetKeepScreenAwake KeepScreenAwakeMode.Always))
+                .Value
 
         // Act (1 minute elapsed, cursor hasn't moved)
         harness.Timestamp.Value <- TimeSpan.FromSeconds(70.0)
@@ -576,6 +648,95 @@ module TrayApplicationTests =
         Assert.That(afterTwoMin.CursorIdleTracker.LastMoveTimestamp, Is.EqualTo(TimeSpan.FromSeconds(130.0)))
         Assert.That(afterTwoMin.CursorIdleTracker.LastCursorPos, Is.EqualTo(Some(400, 300)))
 
+    [<TestCase(true)>]
+    [<TestCase(false)>]
+    let ``CheckStatus with KeepScreenAwake WhenDocked triggers activity when docked in Active or SwitchedAway``
+        (isKvmConnected: bool)
+        =
+        // Arrange
+        let harness = createHarness isKvmConnected true true
+        harness.Timestamp.Value <- TimeSpan.FromSeconds(10.0)
+        harness.CursorPos.Value <- (400, 300)
+
+        let dockState =
+            if isKvmConnected then
+                DockState.Active
+            else
+                DockState.SwitchedAway
+
+        let initialDocked = {
+            TrayStateLogic.initialState with
+                LastDockState = Some dockState
+                KeepScreenAwake = KeepScreenAwakeMode.WhenDocked
+                CursorIdleTracker = {
+                    CursorActivity.LastCursorPos = Some(400, 300)
+                    CursorActivity.LastMoveTimestamp = TimeSpan.FromSeconds(10.0)
+                }
+        }
+
+        // Act (2 minutes elapsed while docked)
+        harness.Timestamp.Value <- TimeSpan.FromSeconds(130.0)
+
+        let afterTwoMin =
+            (TrayStateLogic.step harness.Dependencies initialDocked (CheckStatus false)).Value
+
+        // Assert
+        Assert.That(harness.ActivityCount.Value, Is.EqualTo(1))
+        Assert.That(afterTwoMin.CursorIdleTracker.LastMoveTimestamp, Is.EqualTo(TimeSpan.FromSeconds(130.0)))
+
+    [<Test>]
+    let ``CheckStatus with KeepScreenAwake WhenDocked does not trigger while Unplugged and starts fresh timer on replug``
+        ()
+        =
+        // Arrange (Step 1: Unplug while tracker had prior timestamp)
+        let unpluggedHarness = createHarness false false true
+        unpluggedHarness.Timestamp.Value <- TimeSpan.FromSeconds(200.0)
+        unpluggedHarness.CursorPos.Value <- (400, 300)
+
+        let priorDockedState = {
+            TrayStateLogic.initialState with
+                LastDockState = Some DockState.Active
+                KeepScreenAwake = KeepScreenAwakeMode.WhenDocked
+                CursorIdleTracker = {
+                    CursorActivity.LastCursorPos = Some(400, 300)
+                    CursorActivity.LastMoveTimestamp = TimeSpan.FromSeconds(10.0)
+                }
+        }
+
+        // Act (Step 1: Unplugged for > 2 minutes)
+        let afterUnplug =
+            (TrayStateLogic.step unpluggedHarness.Dependencies priorDockedState (CheckStatus false)).Value
+
+        unpluggedHarness.Timestamp.Value <- TimeSpan.FromSeconds(500.0)
+
+        let afterLongUnplugged =
+            (TrayStateLogic.step unpluggedHarness.Dependencies afterUnplug (CheckStatus false)).Value
+
+        // Assert (Step 1: no activity while unplugged, tracker reset)
+        Assert.That(unpluggedHarness.ActivityCount.Value, Is.EqualTo(0))
+        Assert.That(afterLongUnplugged.CursorIdleTracker, Is.EqualTo(CursorActivity.initialTrackerState))
+
+        // Arrange (Step 2: Replug at t = 510s)
+        let dockedHarness = createHarness true true true
+        dockedHarness.Timestamp.Value <- TimeSpan.FromSeconds(510.0)
+        dockedHarness.CursorPos.Value <- (400, 300)
+
+        // Act (Step 2: Replug initializes fresh 2-minute window instead of triggering immediately)
+        let afterReplug =
+            (TrayStateLogic.step dockedHarness.Dependencies afterLongUnplugged (CheckStatus false)).Value
+
+        Assert.That(dockedHarness.ActivityCount.Value, Is.EqualTo(0))
+        Assert.That(afterReplug.CursorIdleTracker.LastMoveTimestamp, Is.EqualTo(TimeSpan.FromSeconds(510.0)))
+
+        // Act (Step 3: 2 minutes after replug at t = 630s -> triggers activity)
+        dockedHarness.Timestamp.Value <- TimeSpan.FromSeconds(630.0)
+
+        let _ =
+            (TrayStateLogic.step dockedHarness.Dependencies afterReplug (CheckStatus false)).Value
+
+        // Assert (Step 3)
+        Assert.That(dockedHarness.ActivityCount.Value, Is.EqualTo(1))
+
     [<Test>]
     let ``CheckStatus resets idle timer when cursor moves before 2 minutes`` () =
         // Arrange
@@ -586,7 +747,8 @@ module TrayApplicationTests =
         let initialActive = { TrayStateLogic.initialState with LastDockState = Some DockState.Active }
 
         let stateWithKeepAwake =
-            (TrayStateLogic.step harness.Dependencies initialActive (SetKeepScreenAwake true)).Value
+            (TrayStateLogic.step harness.Dependencies initialActive (SetKeepScreenAwake KeepScreenAwakeMode.Always))
+                .Value
 
         // Act (100s elapsed, user moves mouse)
         harness.Timestamp.Value <- TimeSpan.FromSeconds(110.0)

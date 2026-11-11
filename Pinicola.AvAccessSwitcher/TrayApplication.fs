@@ -17,14 +17,14 @@ type internal DockState =
 type internal AppState = {
     LastDockState: DockState option
     AutoExtendOnReconnect: bool
-    KeepScreenAwake: bool
+    KeepScreenAwake: KeepScreenAwakeMode
     CursorIdleTracker: CursorActivity.IdleTrackerState
 }
 
 type internal AppMsg =
     | CheckStatus of userTriggered: bool
     | SetAutoExtend of enabled: bool
-    | SetKeepScreenAwake of enabled: bool
+    | SetKeepScreenAwake of mode: KeepScreenAwakeMode
     | ForceLaptop
     | ForceExtend
     | StopAgent
@@ -66,9 +66,23 @@ module internal TrayStateLogic =
         | true, false -> DockState.SwitchedAway
         | true, true -> DockState.Active
 
-    let private updateCursorIdle (deps: AppDependencies) (state: AppState) : AppState =
-        if not state.KeepScreenAwake then
-            state
+    /// Determines whether keep-screen-awake should be active for the given mode and dock state.
+    let isKeepAwakeActive (mode: KeepScreenAwakeMode) (dockState: DockState) : bool =
+        match mode with
+        | KeepScreenAwakeMode.Off -> false
+        | KeepScreenAwakeMode.Always -> true
+        | KeepScreenAwakeMode.WhenDocked ->
+            match dockState with
+            | DockState.Active
+            | DockState.SwitchedAway -> true
+            | DockState.Unplugged -> false
+
+    let private updateCursorIdle (deps: AppDependencies) (currentDockState: DockState) (state: AppState) : AppState =
+        if not (isKeepAwakeActive state.KeepScreenAwake currentDockState) then
+            if state.CursorIdleTracker = CursorActivity.initialTrackerState then
+                state
+            else
+                { state with CursorIdleTracker = CursorActivity.initialTrackerState }
         else
             let now = deps.GetTimestamp()
             let currentPos = deps.GetCursorPosition()
@@ -107,11 +121,18 @@ module internal TrayStateLogic =
 
             Some nextState
 
-        | SetKeepScreenAwake enabled ->
-            Log.Information("User toggled KeepScreenAwake to {Enabled}.", enabled)
+        | SetKeepScreenAwake mode ->
+            Log.Information("User set KeepScreenAwake mode to {Mode}.", mode)
+
+            let shouldTrackNow =
+                match mode, state.LastDockState with
+                | KeepScreenAwakeMode.Always, _ -> true
+                | KeepScreenAwakeMode.WhenDocked, Some dockState -> isKeepAwakeActive mode dockState
+                | KeepScreenAwakeMode.WhenDocked, None -> false
+                | KeepScreenAwakeMode.Off, _ -> false
 
             let tracker: CursorActivity.IdleTrackerState =
-                if enabled then
+                if shouldTrackNow then
                     {
                         LastCursorPos = Some(deps.GetCursorPosition())
                         LastMoveTimestamp = deps.GetTimestamp()
@@ -121,7 +142,7 @@ module internal TrayStateLogic =
 
             let nextState = {
                 state with
-                    KeepScreenAwake = enabled
+                    KeepScreenAwake = mode
                     CursorIdleTracker = tracker
             }
 
@@ -151,87 +172,95 @@ module internal TrayStateLogic =
             Some state
 
         | CheckStatus userTriggered ->
-            let stateAfterIdleCheck = updateCursorIdle deps state
             let isKvmConnected = deps.IsKvmConnected()
             let isExternalDisplayConnected = deps.IsExternalDisplayConnected()
             let currentDockState = resolveDockState isKvmConnected isExternalDisplayConnected
 
-            match stateAfterIdleCheck.LastDockState with
-            | None ->
-                Log.Information(
-                    "Initial status check: DockState = {DockState} (KvmConnected = {IsKvmConnected}, ExternalDisplay = {IsExternalDisplayConnected}).",
-                    currentDockState,
-                    isKvmConnected,
-                    isExternalDisplayConnected
-                )
+            let nextStateBeforeIdle =
+                match state.LastDockState with
+                | None ->
+                    Log.Information(
+                        "Initial status check: DockState = {DockState} (KvmConnected = {IsKvmConnected}, ExternalDisplay = {IsExternalDisplayConnected}).",
+                        currentDockState,
+                        isKvmConnected,
+                        isExternalDisplayConnected
+                    )
 
-                deps.UpdateUi currentDockState
+                    deps.UpdateUi currentDockState
 
-                let statusMsg =
-                    match currentDockState with
-                    | DockState.Active ->
-                        if stateAfterIdleCheck.AutoExtendOnReconnect then
-                            let applied = deps.SetTopology NativeDisplay.DisplayTopology.Extend
+                    let statusMsg =
+                        match currentDockState with
+                        | DockState.Active ->
+                            if state.AutoExtendOnReconnect then
+                                let applied = deps.SetTopology NativeDisplay.DisplayTopology.Extend
+
+                                if applied then
+                                    "Started monitoring KVM (Display is ACTIVE on this PC. Display set to Extend displays)."
+                                else
+                                    "Started monitoring KVM (Display is ACTIVE on this PC. Failed to set topology)."
+                            else
+                                "Started monitoring KVM (Display is ACTIVE on this PC)."
+                        | DockState.SwitchedAway ->
+                            let applied = deps.SetTopology NativeDisplay.DisplayTopology.ShowOnlyInternal
 
                             if applied then
-                                "Started monitoring KVM (Display is ACTIVE on this PC. Display set to Extend displays)."
+                                "Started monitoring KVM (Display is SWITCHED AWAY. Display set to Show only on 1)."
                             else
-                                "Started monitoring KVM (Display is ACTIVE on this PC. Failed to set topology)."
-                        else
-                            "Started monitoring KVM (Display is ACTIVE on this PC)."
+                                "Started monitoring KVM (Display is SWITCHED AWAY. Failed to set topology)."
+                        | DockState.Unplugged -> "Started monitoring KVM (Dock is UNPLUGGED)."
+
+                    deps.ShowToast "AV Access Switcher Started" statusMsg
+
+                    { state with LastDockState = Some currentDockState }
+
+                | Some prevDockState when prevDockState <> currentDockState || userTriggered ->
+                    if prevDockState <> currentDockState then
+                        Log.Information(
+                            "KVM State Transition: {PrevState} -> {NewState}.",
+                            prevDockState,
+                            currentDockState
+                        )
+                    else
+                        Log.Information("Manual status refresh: DockState = {DockState}.", currentDockState)
+
+                    deps.UpdateUi currentDockState
+
+                    match currentDockState with
+                    | DockState.Unplugged ->
+                        deps.ShowToast
+                            "AV Access Dock Unplugged"
+                            "USB-C cable unplugged. Display is on internal screen."
+
                     | DockState.SwitchedAway ->
                         let applied = deps.SetTopology NativeDisplay.DisplayTopology.ShowOnlyInternal
 
-                        if applied then
-                            "Started monitoring KVM (Display is SWITCHED AWAY. Display set to Show only on 1)."
-                        else
-                            "Started monitoring KVM (Display is SWITCHED AWAY. Failed to set topology)."
-                    | DockState.Unplugged -> "Started monitoring KVM (Dock is UNPLUGGED)."
-
-                deps.ShowToast "AV Access Switcher Started" statusMsg
-
-                Some { stateAfterIdleCheck with LastDockState = Some currentDockState }
-
-            | Some prevDockState when prevDockState <> currentDockState || userTriggered ->
-                if prevDockState <> currentDockState then
-                    Log.Information("KVM State Transition: {PrevState} -> {NewState}.", prevDockState, currentDockState)
-                else
-                    Log.Information("Manual status refresh: DockState = {DockState}.", currentDockState)
-
-                deps.UpdateUi currentDockState
-
-                match currentDockState with
-                | DockState.Unplugged ->
-                    deps.ShowToast "AV Access Dock Unplugged" "USB-C cable unplugged. Display is on internal screen."
-
-                | DockState.SwitchedAway ->
-                    let applied = deps.SetTopology NativeDisplay.DisplayTopology.ShowOnlyInternal
-
-                    let toastMsg =
-                        if applied then
-                            "KVM switched to other PC. Display set to Show only on 1 (Laptop Screen)."
-                        else
-                            "KVM switched to other PC. (Failed to set topology)."
-
-                    deps.ShowToast "AV Access KVM Switched Away" toastMsg
-
-                | DockState.Active ->
-                    if stateAfterIdleCheck.AutoExtendOnReconnect then
-                        let applied = deps.SetTopology NativeDisplay.DisplayTopology.Extend
-
                         let toastMsg =
                             if applied then
-                                "KVM reconnected. Display restored to Extend displays."
+                                "KVM switched to other PC. Display set to Show only on 1 (Laptop Screen)."
                             else
-                                "KVM reconnected. (Failed to set topology)."
+                                "KVM switched to other PC. (Failed to set topology)."
 
-                        deps.ShowToast "AV Access KVM Reconnected" toastMsg
-                    else
-                        deps.ShowToast "AV Access KVM Reconnected" "KVM is back online on this PC."
+                        deps.ShowToast "AV Access KVM Switched Away" toastMsg
 
-                Some { stateAfterIdleCheck with LastDockState = Some currentDockState }
+                    | DockState.Active ->
+                        if state.AutoExtendOnReconnect then
+                            let applied = deps.SetTopology NativeDisplay.DisplayTopology.Extend
 
-            | Some _ -> Some stateAfterIdleCheck
+                            let toastMsg =
+                                if applied then
+                                    "KVM reconnected. Display restored to Extend displays."
+                                else
+                                    "KVM reconnected. (Failed to set topology)."
+
+                            deps.ShowToast "AV Access KVM Reconnected" toastMsg
+                        else
+                            deps.ShowToast "AV Access KVM Reconnected" "KVM is back online on this PC."
+
+                    { state with LastDockState = Some currentDockState }
+
+                | Some _ -> state
+
+            Some(updateCursorIdle deps currentDockState nextStateBeforeIdle)
 
 type TrayApplicationContext() as this =
     inherit ApplicationContext()
@@ -264,6 +293,12 @@ type TrayApplicationContext() as this =
     let statusMenuItem = new ToolStripMenuItem("Status: Initializing...")
     let autoRestoreMenuItem = new ToolStripMenuItem("Auto-Extend on Switch Back")
     let keepAwakeMenuItem = new ToolStripMenuItem("Keep screen awake")
+    let keepAwakeOffMenuItem = new ToolStripMenuItem("Off")
+
+    let keepAwakeWhenDockedMenuItem =
+        new ToolStripMenuItem("Only when connected to dock")
+
+    let keepAwakeAlwaysMenuItem = new ToolStripMenuItem("Always")
     let checkNowMenuItem = new ToolStripMenuItem("Check Status Now")
     let forceLaptopMenuItem = new ToolStripMenuItem("Force: Show Only on 1")
     let forceExtendMenuItem = new ToolStripMenuItem("Force: Extend Displays")
@@ -360,6 +395,15 @@ type TrayApplicationContext() as this =
             loop (TrayStateLogic.createInitialState initialSettings)
         )
 
+    let updateKeepAwakeMenuChecks (mode: KeepScreenAwakeMode) =
+        keepAwakeOffMenuItem.Checked <- (mode = KeepScreenAwakeMode.Off)
+        keepAwakeWhenDockedMenuItem.Checked <- (mode = KeepScreenAwakeMode.WhenDocked)
+        keepAwakeAlwaysMenuItem.Checked <- (mode = KeepScreenAwakeMode.Always)
+
+    let selectKeepAwakeMode (mode: KeepScreenAwakeMode) =
+        updateKeepAwakeMenuChecks mode
+        stateAgent.Post(SetKeepScreenAwake mode)
+
     do
         statusMenuItem.Enabled <- false
         versionMenuItem.Enabled <- false
@@ -368,9 +412,14 @@ type TrayApplicationContext() as this =
         autoRestoreMenuItem.Checked <- initialSettings.AutoExtendOnReconnect
         autoRestoreMenuItem.CheckedChanged.Add(fun _ -> stateAgent.Post(SetAutoExtend autoRestoreMenuItem.Checked))
 
-        keepAwakeMenuItem.CheckOnClick <- true
-        keepAwakeMenuItem.Checked <- initialSettings.KeepScreenAwake
-        keepAwakeMenuItem.CheckedChanged.Add(fun _ -> stateAgent.Post(SetKeepScreenAwake keepAwakeMenuItem.Checked))
+        updateKeepAwakeMenuChecks initialSettings.KeepScreenAwake
+        keepAwakeOffMenuItem.Click.Add(fun _ -> selectKeepAwakeMode KeepScreenAwakeMode.Off)
+        keepAwakeWhenDockedMenuItem.Click.Add(fun _ -> selectKeepAwakeMode KeepScreenAwakeMode.WhenDocked)
+        keepAwakeAlwaysMenuItem.Click.Add(fun _ -> selectKeepAwakeMode KeepScreenAwakeMode.Always)
+
+        keepAwakeMenuItem.DropDownItems.Add(keepAwakeOffMenuItem) |> ignore
+        keepAwakeMenuItem.DropDownItems.Add(keepAwakeWhenDockedMenuItem) |> ignore
+        keepAwakeMenuItem.DropDownItems.Add(keepAwakeAlwaysMenuItem) |> ignore
 
         checkNowMenuItem.Click.Add(fun _ -> stateAgent.Post(CheckStatus true))
         forceLaptopMenuItem.Click.Add(fun _ -> stateAgent.Post(ForceLaptop))

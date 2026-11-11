@@ -7,9 +7,15 @@ open Serilog
 open YamlDotNet.Serialization
 open YamlDotNet.Serialization.NamingConventions
 
+[<RequireQualifiedAccess>]
+type KeepScreenAwakeMode =
+    | Off
+    | WhenDocked
+    | Always
+
 type UserSettings = {
     AutoExtendOnReconnect: bool
-    KeepScreenAwake: bool
+    KeepScreenAwake: KeepScreenAwakeMode
 }
 
 [<RequireQualifiedAccess>]
@@ -20,8 +26,42 @@ module AppSettings =
 
     let defaultSettings: UserSettings = {
         AutoExtendOnReconnect = true
-        KeepScreenAwake = false
+        KeepScreenAwake = KeepScreenAwakeMode.Off
     }
+
+    let private formatKeepScreenAwakeMode (mode: KeepScreenAwakeMode) : string =
+        match mode with
+        | KeepScreenAwakeMode.Off -> "off"
+        | KeepScreenAwakeMode.WhenDocked -> "whenDocked"
+        | KeepScreenAwakeMode.Always -> "always"
+
+    let private parseKeepScreenAwakeMode (rawValue: obj) : KeepScreenAwakeMode option =
+        match rawValue with
+        | :? bool as b ->
+            Some(
+                if b then
+                    KeepScreenAwakeMode.Always
+                else
+                    KeepScreenAwakeMode.Off
+            )
+        | :? string as s ->
+            let trimmed = s.Trim()
+
+            if
+                String.Equals(trimmed, "off", StringComparison.OrdinalIgnoreCase)
+                || String.Equals(trimmed, "false", StringComparison.OrdinalIgnoreCase)
+            then
+                Some KeepScreenAwakeMode.Off
+            elif String.Equals(trimmed, "whenDocked", StringComparison.OrdinalIgnoreCase) then
+                Some KeepScreenAwakeMode.WhenDocked
+            elif
+                String.Equals(trimmed, "always", StringComparison.OrdinalIgnoreCase)
+                || String.Equals(trimmed, "true", StringComparison.OrdinalIgnoreCase)
+            then
+                Some KeepScreenAwakeMode.Always
+            else
+                None
+        | _ -> None
 
     let private defaultFilePath () : string =
         Path.Combine(
@@ -48,8 +88,17 @@ module AppSettings =
             | _ -> None
         )
 
+    let private tryGetKeepScreenAwakeMode (dict: IDictionary<string, obj>) (key: string) : KeepScreenAwakeMode option =
+        dict
+        |> Seq.tryFind (fun kvp -> String.Equals(kvp.Key, key, StringComparison.OrdinalIgnoreCase))
+        |> Option.bind (fun kvp -> parseKeepScreenAwakeMode kvp.Value)
+
     /// Serializes user settings to a YAML string.
-    let internal serialize (settings: UserSettings) : string = serializer.Serialize(settings)
+    let internal serialize (settings: UserSettings) : string =
+        let payload = Dictionary<string, obj>()
+        payload.["autoExtendOnReconnect"] <- box settings.AutoExtendOnReconnect
+        payload.["keepScreenAwake"] <- box (formatKeepScreenAwakeMode settings.KeepScreenAwake)
+        serializer.Serialize(payload)
 
     /// Deserializes user settings from a YAML string, falling back to defaults for missing or invalid fields.
     let internal deserialize (yaml: string) : UserSettings =
@@ -67,7 +116,7 @@ module AppSettings =
                         |> Option.defaultValue defaultSettings.AutoExtendOnReconnect
 
                     let keepAwake =
-                        tryGetBool rawDict "keepScreenAwake"
+                        tryGetKeepScreenAwakeMode rawDict "keepScreenAwake"
                         |> Option.defaultValue defaultSettings.KeepScreenAwake
 
                     {

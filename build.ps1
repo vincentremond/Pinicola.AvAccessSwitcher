@@ -1,4 +1,4 @@
 $ErrorActionPreference = "Stop"
 
 dotnet tool restore
-dotnet build
+dotnet build --configuration Release

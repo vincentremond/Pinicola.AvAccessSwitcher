@@ -104,7 +104,7 @@ module CursorActivityTests =
     [<Test>]
     let ``performActivityWith smoothly moves cursor at configured speed and glides back to origin`` () =
         // Arrange
-        let currentPos = ref (500, 400)
+        let currentPos = ref (Some(500, 400))
         let relativeMoves = ResizeArray<int * int>()
         let sleepDelays = ResizeArray<TimeSpan>()
         let angleIdx = ref 0
@@ -121,10 +121,10 @@ module CursorActivityTests =
             GetScreenBounds = fun _ -> defaultScreenBounds
             SendRelativeMove =
                 fun (dx, dy) ->
-                    let x, y = currentPos.Value
-                    currentPos.Value <- (x + dx, y + dy)
+                    let x, y = currentPos.Value.Value
+                    currentPos.Value <- Some(x + dx, y + dy)
                     relativeMoves.Add((dx, dy))
-            RestoreExactPosition = fun pos -> currentPos.Value <- pos
+            RestoreExactPosition = fun pos -> currentPos.Value <- Some pos
             Sleep = fun delay -> sleepDelays.Add(delay)
             NextDirectionAngle =
                 fun () ->
@@ -146,8 +146,8 @@ module CursorActivityTests =
             deps with
                 SendRelativeMove =
                     fun (dx, dy) ->
-                        let x, y = currentPos.Value
-                        currentPos.Value <- (x + dx, y + dy)
+                        let x, y = currentPos.Value.Value
+                        currentPos.Value <- Some(x + dx, y + dy)
                         fastMoves.Add((dx, dy))
         }
 
@@ -158,8 +158,8 @@ module CursorActivityTests =
             CursorActivity.performActivityWith fastDeps { options with SpeedPxPerSecond = 600.0 }
 
         // Assert
-        Assert.That(finalPos, Is.EqualTo((500, 400)))
-        Assert.That(currentPos.Value, Is.EqualTo((500, 400)))
+        Assert.That(finalPos, Is.EqualTo(Some(500, 400)))
+        Assert.That(currentPos.Value, Is.EqualTo(Some(500, 400)))
         Assert.That(relativeMoves.Count, Is.GreaterThan(50))
 
         let avgSlowStep =
@@ -182,7 +182,7 @@ module CursorActivityTests =
             Bottom = 1080
         }
 
-        let currentPos = ref (1925, 5)
+        let currentPos = ref (Some(1925, 5))
         let visitedPositions = ResizeArray<int * int>()
 
         let deps: CursorActivity.CursorDeps = {
@@ -190,11 +190,11 @@ module CursorActivityTests =
             GetScreenBounds = fun _ -> secondaryBounds
             SendRelativeMove =
                 fun (dx, dy) ->
-                    let x, y = currentPos.Value
+                    let x, y = currentPos.Value.Value
                     let next = (x + dx, y + dy)
-                    currentPos.Value <- next
+                    currentPos.Value <- Some next
                     visitedPositions.Add(next)
-            RestoreExactPosition = fun pos -> currentPos.Value <- pos
+            RestoreExactPosition = fun pos -> currentPos.Value <- Some pos
             Sleep = fun _ -> ()
             // Always try to move diagonally up-left (-X, -Y) towards the primary screen / top edge
             NextDirectionAngle = fun () -> -0.75 * Math.PI
@@ -211,8 +211,8 @@ module CursorActivityTests =
         let finalPos = CursorActivity.performActivityWith deps options
 
         // Assert
-        Assert.That(finalPos, Is.EqualTo((1925, 5)))
-        Assert.That(currentPos.Value, Is.EqualTo((1925, 5)))
+        Assert.That(finalPos, Is.EqualTo(Some(1925, 5)))
+        Assert.That(currentPos.Value, Is.EqualTo(Some(1925, 5)))
         Assert.That(visitedPositions, Is.Not.Empty)
 
         for (x, y) in visitedPositions do
@@ -224,19 +224,19 @@ module CursorActivityTests =
     [<Test>]
     let ``performActivityWith restores exact origin when OS pointer ballistics scales relative moves`` () =
         // Arrange
-        let currentPos = ref (600, 450)
+        let currentPos = ref (Some(600, 450))
 
         let deps: CursorActivity.CursorDeps = {
             GetCursorPosition = fun () -> currentPos.Value
             GetScreenBounds = fun _ -> defaultScreenBounds
             SendRelativeMove =
                 fun (dx, dy) ->
-                    let x, y = currentPos.Value
+                    let x, y = currentPos.Value.Value
                     // Simulate OS mouse acceleration/quantization scaling relative mickeys by 1.6x
                     let actualDx = int (Math.Round(float dx * 1.6))
                     let actualDy = int (Math.Round(float dy * 1.6))
-                    currentPos.Value <- (x + actualDx, y + actualDy)
-            RestoreExactPosition = fun pos -> currentPos.Value <- pos
+                    currentPos.Value <- Some(x + actualDx, y + actualDy)
+            RestoreExactPosition = fun pos -> currentPos.Value <- Some pos
             Sleep = fun _ -> ()
             NextDirectionAngle = fun () -> 0.4
         }
@@ -252,15 +252,15 @@ module CursorActivityTests =
         let finalPos = CursorActivity.performActivityWith deps options
 
         // Assert
-        Assert.That(finalPos, Is.EqualTo((600, 450)))
-        Assert.That(currentPos.Value, Is.EqualTo((600, 450)))
+        Assert.That(finalPos, Is.EqualTo(Some(600, 450)))
+        Assert.That(currentPos.Value, Is.EqualTo(Some(600, 450)))
 
     [<Test>]
     let ``performActivityWith aborts immediately and does not restore origin when user moves mouse during random phase``
         ()
         =
         // Arrange
-        let currentPos = ref (500, 400)
+        let currentPos = ref (Some(500, 400))
         let relativeMoves = ResizeArray<int * int>()
         let restoreCalls = ResizeArray<int * int>()
         let sleepCount = ref 0
@@ -270,12 +270,12 @@ module CursorActivityTests =
             GetScreenBounds = fun _ -> defaultScreenBounds
             SendRelativeMove =
                 fun (dx, dy) ->
-                    let x, y = currentPos.Value
-                    currentPos.Value <- (x + dx, y + dy)
+                    let x, y = currentPos.Value.Value
+                    currentPos.Value <- Some(x + dx, y + dy)
                     relativeMoves.Add((dx, dy))
             RestoreExactPosition =
                 fun pos ->
-                    currentPos.Value <- pos
+                    currentPos.Value <- Some pos
                     restoreCalls.Add(pos)
             Sleep =
                 fun _ ->
@@ -283,7 +283,7 @@ module CursorActivityTests =
 
                     if sleepCount.Value = 5 then
                         // Simulate user moving the physical mouse during frame 5 sleep
-                        currentPos.Value <- (820, 640)
+                        currentPos.Value <- Some(820, 640)
             NextDirectionAngle = fun () -> 0.0
         }
 
@@ -298,8 +298,8 @@ module CursorActivityTests =
         let finalPos = CursorActivity.performActivityWith deps options
 
         // Assert
-        Assert.That(finalPos, Is.EqualTo((820, 640)))
-        Assert.That(currentPos.Value, Is.EqualTo((820, 640)))
+        Assert.That(finalPos, Is.EqualTo(Some(820, 640)))
+        Assert.That(currentPos.Value, Is.EqualTo(Some(820, 640)))
         Assert.That(relativeMoves.Count, Is.EqualTo(5))
         Assert.That(restoreCalls, Is.Empty)
 
@@ -308,7 +308,7 @@ module CursorActivityTests =
         ()
         =
         // Arrange
-        let currentPos = ref (500, 400)
+        let currentPos = ref (Some(500, 400))
         let restoreCalls = ResizeArray<int * int>()
         let sleepCount = ref 0
 
@@ -317,11 +317,11 @@ module CursorActivityTests =
             GetScreenBounds = fun _ -> defaultScreenBounds
             SendRelativeMove =
                 fun (dx, dy) ->
-                    let x, y = currentPos.Value
-                    currentPos.Value <- (x + dx, y + dy)
+                    let x, y = currentPos.Value.Value
+                    currentPos.Value <- Some(x + dx, y + dy)
             RestoreExactPosition =
                 fun pos ->
-                    currentPos.Value <- pos
+                    currentPos.Value <- Some pos
                     restoreCalls.Add(pos)
             Sleep =
                 fun _ ->
@@ -329,7 +329,7 @@ module CursorActivityTests =
 
                     // 5 frames in Phase 1 (100ms / 20ms); sleep 7 is during Phase 2 return glide
                     if sleepCount.Value = 7 then
-                        currentPos.Value <- (300, 220)
+                        currentPos.Value <- Some(300, 220)
             NextDirectionAngle = fun () -> 0.0
         }
 
@@ -344,8 +344,80 @@ module CursorActivityTests =
         let finalPos = CursorActivity.performActivityWith deps options
 
         // Assert
-        Assert.That(finalPos, Is.EqualTo((300, 220)))
-        Assert.That(currentPos.Value, Is.EqualTo((300, 220)))
+        Assert.That(finalPos, Is.EqualTo(Some(300, 220)))
+        Assert.That(currentPos.Value, Is.EqualTo(Some(300, 220)))
+        Assert.That(restoreCalls, Is.Empty)
+
+    [<Test>]
+    let ``performActivityWith skips immediately without sending input when desktop is inaccessible`` () =
+        // Arrange
+        let relativeMoves = ResizeArray<int * int>()
+        let restoreCalls = ResizeArray<int * int>()
+
+        let deps: CursorActivity.CursorDeps = {
+            GetCursorPosition = fun () -> None
+            GetScreenBounds = fun _ -> defaultScreenBounds
+            SendRelativeMove = fun mv -> relativeMoves.Add(mv)
+            RestoreExactPosition = fun pos -> restoreCalls.Add(pos)
+            Sleep = fun _ -> ()
+            NextDirectionAngle = fun () -> 0.0
+        }
+
+        let options: CursorActivity.CursorMovementOptions = {
+            Duration = TimeSpan.FromSeconds(2.0)
+            FrameInterval = TimeSpan.FromMilliseconds(20.0)
+            DirectionChangeInterval = TimeSpan.FromMilliseconds(400.0)
+            SpeedPxPerSecond = 250.0
+        }
+
+        // Act
+        let finalPos = CursorActivity.performActivityWith deps options
+
+        // Assert
+        Assert.That(finalPos, Is.EqualTo(None))
+        Assert.That(relativeMoves, Is.Empty)
+        Assert.That(restoreCalls, Is.Empty)
+
+    [<Test>]
+    let ``performActivityWith aborts immediately and does not restore origin if workstation locks mid-activity`` () =
+        // Arrange
+        let currentPos = ref (Some(500, 400))
+        let relativeMoves = ResizeArray<int * int>()
+        let restoreCalls = ResizeArray<int * int>()
+        let sleepCount = ref 0
+
+        let deps: CursorActivity.CursorDeps = {
+            GetCursorPosition = fun () -> currentPos.Value
+            GetScreenBounds = fun _ -> defaultScreenBounds
+            SendRelativeMove =
+                fun (dx, dy) ->
+                    let x, y = currentPos.Value.Value
+                    currentPos.Value <- Some(x + dx, y + dy)
+                    relativeMoves.Add((dx, dy))
+            RestoreExactPosition = fun pos -> restoreCalls.Add(pos)
+            Sleep =
+                fun _ ->
+                    sleepCount.Value <- sleepCount.Value + 1
+
+                    if sleepCount.Value = 3 then
+                        // Simulate workstation locking (Win+L -> GetCursorPos returns None)
+                        currentPos.Value <- None
+            NextDirectionAngle = fun () -> 0.0
+        }
+
+        let options: CursorActivity.CursorMovementOptions = {
+            Duration = TimeSpan.FromSeconds(2.0)
+            FrameInterval = TimeSpan.FromMilliseconds(20.0)
+            DirectionChangeInterval = TimeSpan.FromMilliseconds(400.0)
+            SpeedPxPerSecond = 250.0
+        }
+
+        // Act
+        let finalPos = CursorActivity.performActivityWith deps options
+
+        // Assert
+        Assert.That(finalPos, Is.EqualTo(None))
+        Assert.That(relativeMoves.Count, Is.EqualTo(3))
         Assert.That(restoreCalls, Is.Empty)
 
     [<Test>]
@@ -363,15 +435,16 @@ module CursorActivityTests =
     [<Test; Explicit("Physically moves the mouse cursor on the system.")>]
     let ``keepScreenAwake physically moves the cursor and restores original position`` () =
         // Arrange
-        let before = CursorActivity.getCursorPosition ()
+        let before = CursorActivity.tryGetCursorPosition ()
         let stopwatch = Stopwatch.StartNew()
 
         // Act
         let returned = CursorActivity.keepScreenAwake ()
         stopwatch.Stop()
-        let after = CursorActivity.getCursorPosition ()
+        let after = CursorActivity.tryGetCursorPosition ()
 
         // Assert
+        Assert.That(before.IsSome, Is.True)
         Assert.That(returned, Is.EqualTo(before))
         Assert.That(after, Is.EqualTo(before))
 

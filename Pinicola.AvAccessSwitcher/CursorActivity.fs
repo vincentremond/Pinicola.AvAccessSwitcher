@@ -50,13 +50,19 @@ module CursorActivity =
     }
 
     type internal CursorDeps = {
-        GetCursorPosition: unit -> int * int
+        GetCursorPosition: unit -> (int * int) option
         GetScreenBounds: int * int -> ScreenBounds
         SendRelativeMove: int * int -> unit
         RestoreExactPosition: int * int -> unit
         Sleep: TimeSpan -> unit
         NextDirectionAngle: unit -> float
     }
+
+    [<RequireQualifiedAccess>]
+    type private PhaseOutcome =
+        | Completed
+        | AbortedByUser of (int * int)
+        | DesktopInaccessible
 
     type IdleTrackerState = {
         LastCursorPos: (int * int) option
@@ -150,190 +156,223 @@ module CursorActivity =
 
         Math.Atan2(reflectedVy, reflectedVx)
 
-    /// Smoothly moves the cursor in random directions within its current screen at the configured speed using SendInput, then smoothly glides back to its original position unless aborted by user mouse movement.
-    let internal performActivityWith (deps: CursorDeps) (options: CursorMovementOptions) : int * int =
-        let originPos = deps.GetCursorPosition()
-        let originX, originY = originPos
-        let screenBounds = deps.GetScreenBounds(originX, originY)
-
-        let minX = screenBounds.Left
-        let maxX = max screenBounds.Left (screenBounds.Right - 1)
-        let minY = screenBounds.Top
-        let maxY = max screenBounds.Top (screenBounds.Bottom - 1)
-
-        let frameInterval =
-            if options.FrameInterval > TimeSpan.FromMilliseconds(1.0) then
-                options.FrameInterval
-            else
-                TimeSpan.FromMilliseconds(1.0)
-
-        let totalFrames =
-            max 0 (int (Math.Round((options.Duration.TotalMilliseconds / 2.0) / frameInterval.TotalMilliseconds)))
-
-        let framesPerDirection =
-            max
-                1
-                (int (
-                    Math.Round(
-                        options.DirectionChangeInterval.TotalMilliseconds
-                        / frameInterval.TotalMilliseconds
-                    )
-                ))
-
-        let stepDistancePx = max 0.5 (options.SpeedPxPerSecond * frameInterval.TotalSeconds)
-
-        // Phase 1: Smooth movement along random direction vectors for options.Duration, bouncing off current screen edges.
-        // Returns Some userPos if the user moves the mouse during a frame sleep, or None if Phase 1 completes normally.
-        let rec moveRandomLoop
-            (frameIdx: int)
-            (expectedPos: int * int)
-            (angle: float)
-            (remX: float)
-            (remY: float)
-            : (int * int) option =
-            let curPos = deps.GetCursorPosition()
-
-            if curPos <> expectedPos then
-                Log.Information(
-                    "User mouse movement detected during cursor activity (expected {ExpectedPos}, actual {ActualPos}). Aborting automatic movement.",
-                    expectedPos,
-                    curPos
-                )
-
-                Some curPos
-            elif frameIdx < totalFrames then
-                let curX, curY = curPos
-
-                let rawAngle =
-                    if frameIdx % framesPerDirection = 0 then
-                        deps.NextDirectionAngle()
-                    else
-                        angle
-
-                let safeAngle =
-                    constrainDirectionToBounds screenBounds curPos stepDistancePx rawAngle
-
-                let targetX = Math.Cos(safeAngle) * stepDistancePx + remX
-                let targetY = Math.Sin(safeAngle) * stepDistancePx + remY
-                let unclampedMoveX = int (Math.Round(targetX))
-                let unclampedMoveY = int (Math.Round(targetY))
-
-                let clampedDestX = Math.Clamp(curX + unclampedMoveX, minX, maxX)
-                let clampedDestY = Math.Clamp(curY + unclampedMoveY, minY, maxY)
-                let moveX = clampedDestX - curX
-                let moveY = clampedDestY - curY
-
-                if moveX <> 0 || moveY <> 0 then
-                    deps.SendRelativeMove(moveX, moveY)
-
-                let posAfterSend = deps.GetCursorPosition()
-                deps.Sleep frameInterval
-
-                moveRandomLoop
-                    (frameIdx + 1)
-                    posAfterSend
-                    safeAngle
-                    (targetX - float unclampedMoveX)
-                    (targetY - float unclampedMoveY)
-            else
-                None
-
-        let abortedDuringPhase1 =
-            if totalFrames > 0 then
-                moveRandomLoop 0 originPos 0.0 0.0 0.0
-            else
-                None
-
-        match abortedDuringPhase1 with
-        | Some userPos -> userPos
+    /// Smoothly moves the cursor in random directions within its current screen at the configured speed using SendInput, then smoothly glides back to its original position unless aborted by user mouse movement or a locked/inaccessible input desktop.
+    let internal performActivityWith (deps: CursorDeps) (options: CursorMovementOptions) : (int * int) option =
+        match deps.GetCursorPosition() with
         | None ->
-            // Phase 2: Closed-loop smooth return glide to the exact origin at the configured speed
-            let initialReturnPos = deps.GetCursorPosition()
-            let initialReturnX, initialReturnY = initialReturnPos
-            let initialDeltaX = originX - initialReturnX
-            let initialDeltaY = originY - initialReturnY
+            Log.Debug("Input desktop is inaccessible (workstation likely locked); skipping cursor activity.")
+            None
+        | Some originPos ->
+            let originX, originY = originPos
+            let screenBounds = deps.GetScreenBounds(originX, originY)
 
-            let initialDistance =
-                Math.Sqrt(float (initialDeltaX * initialDeltaX + initialDeltaY * initialDeltaY))
+            let minX = screenBounds.Left
+            let maxX = max screenBounds.Left (screenBounds.Right - 1)
+            let minY = screenBounds.Top
+            let maxY = max screenBounds.Top (screenBounds.Bottom - 1)
 
-            let abortedDuringPhase2 =
-                if initialDistance > 0.0 then
-                    let maxReturnFrames =
-                        max 20 (int (Math.Ceiling(initialDistance / stepDistancePx)) * 4 + 30)
+            let frameInterval =
+                if options.FrameInterval > TimeSpan.FromMilliseconds(1.0) then
+                    options.FrameInterval
+                else
+                    TimeSpan.FromMilliseconds(1.0)
 
-                    let rec returnLoop
-                        (stepIdx: int)
-                        (expectedPos: int * int)
-                        (remX: float)
-                        (remY: float)
-                        (closeFrames: int)
-                        : (int * int) option =
-                        let curPos = deps.GetCursorPosition()
+            let totalFrames =
+                max 0 (int (Math.Round((options.Duration.TotalMilliseconds / 2.0) / frameInterval.TotalMilliseconds)))
 
-                        if curPos <> expectedPos then
+            let framesPerDirection =
+                max
+                    1
+                    (int (
+                        Math.Round(
+                            options.DirectionChangeInterval.TotalMilliseconds
+                            / frameInterval.TotalMilliseconds
+                        )
+                    ))
+
+            let stepDistancePx = max 0.5 (options.SpeedPxPerSecond * frameInterval.TotalSeconds)
+
+            // Phase 1: Smooth movement along random direction vectors for half of options.Duration, bouncing off current screen edges.
+            let rec moveRandomLoop
+                (frameIdx: int)
+                (expectedPos: int * int)
+                (angle: float)
+                (remX: float)
+                (remY: float)
+                : PhaseOutcome =
+                match deps.GetCursorPosition() with
+                | None ->
+                    Log.Information(
+                        "Input desktop became inaccessible during cursor activity. Aborting automatic movement."
+                    )
+
+                    PhaseOutcome.DesktopInaccessible
+                | Some curPos when curPos <> expectedPos ->
+                    Log.Information(
+                        "User mouse movement detected during cursor activity (expected {ExpectedPos}, actual {ActualPos}). Aborting automatic movement.",
+                        expectedPos,
+                        curPos
+                    )
+
+                    PhaseOutcome.AbortedByUser curPos
+                | Some curPos ->
+                    if frameIdx < totalFrames then
+                        let curX, curY = curPos
+
+                        let rawAngle =
+                            if frameIdx % framesPerDirection = 0 then
+                                deps.NextDirectionAngle()
+                            else
+                                angle
+
+                        let safeAngle =
+                            constrainDirectionToBounds screenBounds curPos stepDistancePx rawAngle
+
+                        let targetX = Math.Cos(safeAngle) * stepDistancePx + remX
+                        let targetY = Math.Sin(safeAngle) * stepDistancePx + remY
+                        let unclampedMoveX = int (Math.Round(targetX))
+                        let unclampedMoveY = int (Math.Round(targetY))
+
+                        let clampedDestX = Math.Clamp(curX + unclampedMoveX, minX, maxX)
+                        let clampedDestY = Math.Clamp(curY + unclampedMoveY, minY, maxY)
+                        let moveX = clampedDestX - curX
+                        let moveY = clampedDestY - curY
+
+                        if moveX <> 0 || moveY <> 0 then
+                            deps.SendRelativeMove(moveX, moveY)
+
+                        match deps.GetCursorPosition() with
+                        | None ->
                             Log.Information(
-                                "User mouse movement detected during cursor return glide (expected {ExpectedPos}, actual {ActualPos}). Aborting return to origin.",
-                                expectedPos,
-                                curPos
+                                "Input desktop became inaccessible during cursor activity. Aborting automatic movement."
                             )
 
-                            Some curPos
-                        else
-                            let curX, curY = curPos
-                            let dx = originX - curX
-                            let dy = originY - curY
+                            PhaseOutcome.DesktopInaccessible
+                        | Some posAfterSend ->
+                            deps.Sleep frameInterval
 
-                            if (dx <> 0 || dy <> 0) && stepIdx <= maxReturnFrames && closeFrames < 8 then
-                                let dist = Math.Sqrt(float (dx * dx + dy * dy))
+                            moveRandomLoop
+                                (frameIdx + 1)
+                                posAfterSend
+                                safeAngle
+                                (targetX - float unclampedMoveX)
+                                (targetY - float unclampedMoveY)
+                    else
+                        PhaseOutcome.Completed
 
-                                let stepMoveX, stepMoveY, nextRemX, nextRemY, nextCloseFrames =
-                                    if dist <= stepDistancePx then
-                                        let nudgeX = if Math.Abs(dx) <= 2 then Math.Sign(dx) else dx
-                                        let nudgeY = if Math.Abs(dy) <= 2 then Math.Sign(dy) else dy
-                                        nudgeX, nudgeY, 0.0, 0.0, (closeFrames + 1)
-                                    else
-                                        let targetX = (float dx / dist) * stepDistancePx + remX
-                                        let targetY = (float dy / dist) * stepDistancePx + remY
-                                        let moveX = int (Math.Round(targetX))
-                                        let moveY = int (Math.Round(targetY))
-                                        moveX, moveY, (targetX - float moveX), (targetY - float moveY), 0
-
-                                if stepMoveX <> 0 || stepMoveY <> 0 then
-                                    deps.SendRelativeMove(stepMoveX, stepMoveY)
-
-                                let afterPos = deps.GetCursorPosition()
-
-                                if afterPos <> originPos then
-                                    deps.Sleep frameInterval
-                                    returnLoop (stepIdx + 1) afterPos nextRemX nextRemY nextCloseFrames
-                                else
-                                    None
-                            else
-                                None
-
-                    returnLoop 1 initialReturnPos 0.0 0.0 0
+            let phase1Outcome =
+                if totalFrames > 0 then
+                    moveRandomLoop 0 originPos 0.0 0.0 0.0
                 else
-                    None
+                    PhaseOutcome.Completed
 
-            match abortedDuringPhase2 with
-            | Some userPos -> userPos
-            | None ->
-                // Final verification step if OS mouse ballistics quantization left a 1-2 px offset
-                let finalPos = deps.GetCursorPosition()
+            match phase1Outcome with
+            | PhaseOutcome.DesktopInaccessible -> None
+            | PhaseOutcome.AbortedByUser userPos -> Some userPos
+            | PhaseOutcome.Completed ->
+                // Phase 2: Closed-loop smooth return glide to the exact origin at the configured speed
+                match deps.GetCursorPosition() with
+                | None -> None
+                | Some initialReturnPos ->
+                    let initialReturnX, initialReturnY = initialReturnPos
+                    let initialDeltaX = originX - initialReturnX
+                    let initialDeltaY = originY - initialReturnY
 
-                if finalPos <> originPos then
-                    deps.RestoreExactPosition(originX, originY)
+                    let initialDistance =
+                        Math.Sqrt(float (initialDeltaX * initialDeltaX + initialDeltaY * initialDeltaY))
 
-                originPos
+                    let phase2Outcome =
+                        if initialDistance > 0.0 then
+                            let maxReturnFrames =
+                                max 20 (int (Math.Ceiling(initialDistance / stepDistancePx)) * 4 + 30)
+
+                            let rec returnLoop
+                                (stepIdx: int)
+                                (expectedPos: int * int)
+                                (remX: float)
+                                (remY: float)
+                                (closeFrames: int)
+                                : PhaseOutcome =
+                                match deps.GetCursorPosition() with
+                                | None ->
+                                    Log.Information(
+                                        "Input desktop became inaccessible during cursor return glide. Aborting return to origin."
+                                    )
+
+                                    PhaseOutcome.DesktopInaccessible
+                                | Some curPos when curPos <> expectedPos ->
+                                    Log.Information(
+                                        "User mouse movement detected during cursor return glide (expected {ExpectedPos}, actual {ActualPos}). Aborting return to origin.",
+                                        expectedPos,
+                                        curPos
+                                    )
+
+                                    PhaseOutcome.AbortedByUser curPos
+                                | Some curPos ->
+                                    let curX, curY = curPos
+                                    let dx = originX - curX
+                                    let dy = originY - curY
+
+                                    if (dx <> 0 || dy <> 0) && stepIdx <= maxReturnFrames && closeFrames < 8 then
+                                        let dist = Math.Sqrt(float (dx * dx + dy * dy))
+
+                                        let stepMoveX, stepMoveY, nextRemX, nextRemY, nextCloseFrames =
+                                            if dist <= stepDistancePx then
+                                                let nudgeX = if Math.Abs(dx) <= 2 then Math.Sign(dx) else dx
+                                                let nudgeY = if Math.Abs(dy) <= 2 then Math.Sign(dy) else dy
+                                                nudgeX, nudgeY, 0.0, 0.0, (closeFrames + 1)
+                                            else
+                                                let targetX = (float dx / dist) * stepDistancePx + remX
+                                                let targetY = (float dy / dist) * stepDistancePx + remY
+                                                let moveX = int (Math.Round(targetX))
+                                                let moveY = int (Math.Round(targetY))
+                                                moveX, moveY, (targetX - float moveX), (targetY - float moveY), 0
+
+                                        if stepMoveX <> 0 || stepMoveY <> 0 then
+                                            deps.SendRelativeMove(stepMoveX, stepMoveY)
+
+                                        match deps.GetCursorPosition() with
+                                        | None ->
+                                            Log.Information(
+                                                "Input desktop became inaccessible during cursor return glide. Aborting return to origin."
+                                            )
+
+                                            PhaseOutcome.DesktopInaccessible
+                                        | Some afterPos ->
+                                            if afterPos <> originPos then
+                                                deps.Sleep frameInterval
+                                                returnLoop (stepIdx + 1) afterPos nextRemX nextRemY nextCloseFrames
+                                            else
+                                                PhaseOutcome.Completed
+                                    else
+                                        PhaseOutcome.Completed
+
+                            returnLoop 1 initialReturnPos 0.0 0.0 0
+                        else
+                            PhaseOutcome.Completed
+
+                    match phase2Outcome with
+                    | PhaseOutcome.DesktopInaccessible -> None
+                    | PhaseOutcome.AbortedByUser userPos -> Some userPos
+                    | PhaseOutcome.Completed ->
+                        // Final verification step if OS mouse ballistics quantization left a 1-2 px offset
+                        match deps.GetCursorPosition() with
+                        | None -> None
+                        | Some finalPos ->
+                            if finalPos <> originPos then
+                                deps.RestoreExactPosition(originX, originY)
+
+                            Some originPos
 
     /// Creates a Win32 INPUT structure for a relative mouse move (mouseData = 0, dx, dy).
     let internal createRelativeMoveInput (dx: int, dy: int) : User32.INPUT =
         User32.INPUT(User32.MOUSEEVENTF.MOUSEEVENTF_MOVE, 0, dx, dy)
 
-    /// Returns the current cursor coordinates via Win32 GetCursorPos.
-    let getCursorPosition () : int * int =
+    /// Attempts to read the current cursor coordinates via Win32 GetCursorPos.
+    /// Returns None when the input desktop is inaccessible (e.g., while Windows is locked).
+    let tryGetCursorPosition () : (int * int) option =
         let ok, pt = User32.GetCursorPos()
-        if ok then (pt.X, pt.Y) else (0, 0)
+        if ok then Some(pt.X, pt.Y) else None
 
     let private defaultGetScreenBounds (x: int, y: int) : ScreenBounds =
         let rect = Screen.FromPoint(Point(x, y)).Bounds
@@ -369,14 +408,14 @@ module CursorActivity =
             let inputSize = System.Runtime.InteropServices.Marshal.SizeOf<User32.INPUT>()
             User32.SendInput(uint32 inputs.Length, inputs, inputSize) |> ignore
 
-        if getCursorPosition () <> (x, y) then
+        if tryGetCursorPosition () <> Some(x, y) then
             User32.SetCursorPos(x, y) |> ignore
 
     let private defaultNextDirectionAngle () : float =
         Random.Shared.NextDouble() * 2.0 * Math.PI
 
     let private defaultDeps = {
-        GetCursorPosition = getCursorPosition
+        GetCursorPosition = tryGetCursorPosition
         GetScreenBounds = defaultGetScreenBounds
         SendRelativeMove = defaultSendRelativeMove
         RestoreExactPosition = defaultRestoreExactPosition
@@ -384,8 +423,8 @@ module CursorActivity =
         NextDirectionAngle = defaultNextDirectionAngle
     }
 
-    /// Performs brief smooth cursor activity within the current screen using SendInput and glides back to its original coordinates unless aborted by user mouse movement.
-    let keepScreenAwake () : int * int =
+    /// Performs brief smooth cursor activity within the current screen using SendInput and glides back to its original coordinates unless aborted by user mouse movement or a locked desktop.
+    let keepScreenAwake () : (int * int) option =
         try
             Log.Information(
                 "No cursor movement detected for {IdleThreshold}. Performing cursor activity at {Speed} px/s...",
@@ -398,4 +437,4 @@ module CursorActivity =
             finalPos
         with ex ->
             Log.Error(ex, "Error while performing cursor activity.")
-            getCursorPosition ()
+            tryGetCursorPosition ()

@@ -8,6 +8,7 @@ open System.Threading
 open System.Windows.Forms
 open Microsoft.Toolkit.Uwp.Notifications
 open Serilog
+open Vanara.PInvoke
 
 type internal DockState =
     | Unplugged
@@ -36,8 +37,8 @@ type internal AppDependencies = {
     UpdateUi: DockState -> unit
     ShowToast: string -> string -> unit
     GetTimestamp: unit -> TimeSpan
-    GetCursorPosition: unit -> int * int
-    KeepScreenAwake: unit -> int * int
+    GetCursorPosition: unit -> (int * int) option
+    KeepScreenAwake: unit -> (int * int) option
     SaveSettings: UserSettings -> unit
 }
 
@@ -77,32 +78,47 @@ module internal TrayStateLogic =
             | DockState.SwitchedAway -> true
             | DockState.Unplugged -> false
 
+    let PollInterval = 2.0<Second> |> Second.toTimeSpan
+
+    let private resetIdleTrackerIfNeeded (state: AppState) : AppState =
+        if state.CursorIdleTracker = CursorActivity.initialTrackerState then
+            state
+        else
+            { state with CursorIdleTracker = CursorActivity.initialTrackerState }
+
     let private updateCursorIdle (deps: AppDependencies) (currentDockState: DockState) (state: AppState) : AppState =
         if not (isKeepAwakeActive state.KeepScreenAwake currentDockState) then
-            if state.CursorIdleTracker = CursorActivity.initialTrackerState then
-                state
-            else
-                { state with CursorIdleTracker = CursorActivity.initialTrackerState }
+            resetIdleTrackerIfNeeded state
         else
-            let now = deps.GetTimestamp()
-            let currentPos = deps.GetCursorPosition()
+            match deps.GetCursorPosition() with
+            | None ->
+                // Input desktop is inaccessible (e.g., Windows lock screen); skip activity and reset idle window.
+                resetIdleTrackerIfNeeded state
+            | Some currentPos ->
+                let now = deps.GetTimestamp()
 
-            let nextTracker, shouldTrigger =
-                CursorActivity.evaluateCursorIdle CursorActivity.IdleThreshold now currentPos state.CursorIdleTracker
+                let nextTracker, shouldTrigger =
+                    CursorActivity.evaluateCursorIdle
+                        CursorActivity.IdleThreshold
+                        now
+                        currentPos
+                        state.CursorIdleTracker
 
-            if shouldTrigger then
-                let restoredPos = deps.KeepScreenAwake()
-                let afterActivity = deps.GetTimestamp()
+                if shouldTrigger then
+                    let restoredPosOpt = deps.KeepScreenAwake()
+                    let afterActivity = deps.GetTimestamp()
 
-                {
-                    state with
-                        CursorIdleTracker = {
-                            CursorActivity.LastCursorPos = Some restoredPos
-                            CursorActivity.LastMoveTimestamp = afterActivity
-                        }
-                }
-            else
-                { state with CursorIdleTracker = nextTracker }
+                    match restoredPosOpt with
+                    | Some restoredPos -> {
+                        state with
+                            CursorIdleTracker = {
+                                CursorActivity.LastCursorPos = Some restoredPos
+                                CursorActivity.LastMoveTimestamp = afterActivity
+                            }
+                      }
+                    | None -> resetIdleTrackerIfNeeded state
+                else
+                    { state with CursorIdleTracker = nextTracker }
 
     let step (deps: AppDependencies) (state: AppState) (msg: AppMsg) : AppState option =
         match msg with
@@ -133,10 +149,12 @@ module internal TrayStateLogic =
 
             let tracker: CursorActivity.IdleTrackerState =
                 if shouldTrackNow then
-                    {
-                        LastCursorPos = Some(deps.GetCursorPosition())
+                    match deps.GetCursorPosition() with
+                    | Some pos -> {
+                        LastCursorPos = Some pos
                         LastMoveTimestamp = deps.GetTimestamp()
-                    }
+                      }
+                    | None -> CursorActivity.initialTrackerState
                 else
                     CursorActivity.initialTrackerState
 
@@ -262,6 +280,35 @@ module internal TrayStateLogic =
 
             Some(updateCursorIdle deps currentDockState nextStateBeforeIdle)
 
+    /// Starts the state actor with non-overlapping periodic polling via TryReceive, preventing queue backlog if checks are throttled.
+    let startAgent
+        (pollInterval: TimeSpan)
+        (deps: AppDependencies)
+        (initialSettings: UserSettings)
+        : MailboxProcessor<AppMsg> =
+        let timeoutMs = max 1 (int (Math.Round(pollInterval.TotalMilliseconds)))
+
+        MailboxProcessor.Start(fun inbox ->
+            let rec loop (state: AppState) =
+                async {
+                    let! msgOpt = inbox.TryReceive(timeoutMs)
+                    let msg = msgOpt |> Option.defaultValue (CheckStatus false)
+
+                    let nextStateOpt =
+                        try
+                            step deps state msg
+                        with ex ->
+                            Log.Error(ex, "Unhandled exception in state agent while processing {Message}.", msg)
+                            Some state
+
+                    match nextStateOpt with
+                    | None -> return ()
+                    | Some nextState -> return! loop nextState
+                }
+
+            loop (createInitialState initialSettings)
+        )
+
 type TrayApplicationContext() as this =
     inherit ApplicationContext()
 
@@ -308,8 +355,6 @@ type TrayApplicationContext() as this =
 
     let exitMenuItem = new ToolStripMenuItem("Exit")
 
-    let checkTimer = new Timer()
-
     // Helper: Display rich Windows Toast Notifications with custom logo icon in corner
     let showToast (title: string) (message: string) =
         try
@@ -331,10 +376,11 @@ type TrayApplicationContext() as this =
         | null -> action ()
         | ctx -> ctx.Post((fun _ -> action ()), null)
 
-    // Dynamic status icon generator overlaying status badge onto custom app icon
+    // Dynamic status icon generator overlaying status badge onto custom app icon without leaking native HICON handles
     let createStatusIcon (isActive: bool) : Icon =
         try
-            let bitmap = new Bitmap(appIcon.ToBitmap(), 32, 32)
+            use sourceBitmap = appIcon.ToBitmap()
+            use bitmap = new Bitmap(sourceBitmap, 32, 32)
 
             using
                 (Graphics.FromImage(bitmap))
@@ -345,9 +391,18 @@ type TrayApplicationContext() as this =
                     using (new Pen(Color.White, 1.5f)) (fun pen -> g.DrawEllipse(pen, 18, 18, 12, 12))
                 )
 
-            Icon.FromHandle(bitmap.GetHicon())
+            let hIcon = bitmap.GetHicon()
+
+            try
+                use tempIcon = Icon.FromHandle(hIcon)
+                tempIcon.Clone() :?> Icon
+            finally
+                User32.DestroyIcon(hIcon) |> ignore
         with _ ->
             appIcon
+
+    let activeStatusIcon = createStatusIcon true
+    let inactiveStatusIcon = createStatusIcon false
 
     let updateUiControls (dockState: DockState) =
         match dockState with
@@ -362,7 +417,11 @@ type TrayApplicationContext() as this =
             notifyIcon.Text <- "AV Access Switcher: Dock Unplugged (Laptop Only)"
 
         try
-            notifyIcon.Icon <- createStatusIcon (dockState = DockState.Active)
+            notifyIcon.Icon <-
+                if dockState = DockState.Active then
+                    activeStatusIcon
+                else
+                    inactiveStatusIcon
         with _ ->
             ()
 
@@ -375,25 +434,14 @@ type TrayApplicationContext() as this =
         UpdateUi = fun dockState -> postToUi (fun () -> updateUiControls dockState)
         ShowToast = fun title message -> postToUi (fun () -> showToast title message)
         GetTimestamp = fun () -> TimeSpan.FromMilliseconds(float Environment.TickCount64)
-        GetCursorPosition = CursorActivity.getCursorPosition
+        GetCursorPosition = CursorActivity.tryGetCursorPosition
         KeepScreenAwake = CursorActivity.keepScreenAwake
         SaveSettings = AppSettings.save
     }
 
-    // Pure functional MailboxProcessor managing state without mutable variables
+    // Pure functional MailboxProcessor managing state and non-overlapping periodic checks without mutable variables
     let stateAgent =
-        MailboxProcessor.Start(fun inbox ->
-            let rec loop (state: AppState) =
-                async {
-                    let! msg = inbox.Receive()
-
-                    match TrayStateLogic.step appDeps state msg with
-                    | None -> return ()
-                    | Some nextState -> return! loop nextState
-                }
-
-            loop (TrayStateLogic.createInitialState initialSettings)
-        )
+        TrayStateLogic.startAgent TrayStateLogic.PollInterval appDeps initialSettings
 
     let updateKeepAwakeMenuChecks (mode: KeepScreenAwakeMode) =
         keepAwakeOffMenuItem.Checked <- (mode = KeepScreenAwakeMode.Off)
@@ -443,17 +491,19 @@ type TrayApplicationContext() as this =
         notifyIcon.Icon <- appIcon
         notifyIcon.Visible <- true
 
-        checkTimer.Interval <- 2000
-        checkTimer.Tick.Add(fun _ -> stateAgent.Post(CheckStatus false))
-        checkTimer.Start()
-
         stateAgent.Post(CheckStatus false)
 
     member private this.ExitApp() =
         Log.Information("Exiting application context...")
-        checkTimer.Stop()
         stateAgent.Post(StopAgent)
         notifyIcon.Visible <- false
         notifyIcon.Dispose()
+
+        if not (obj.ReferenceEquals(activeStatusIcon, appIcon)) then
+            activeStatusIcon.Dispose()
+
+        if not (obj.ReferenceEquals(inactiveStatusIcon, appIcon)) then
+            inactiveStatusIcon.Dispose()
+
         Log.CloseAndFlush()
         this.ExitThread()

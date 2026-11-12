@@ -1,6 +1,7 @@
 namespace Pinicola.AvAccessSwitcher.Tests
 
 open System
+open System.Threading
 open NUnit.Framework
 open Pinicola.AvAccessSwitcher
 
@@ -15,7 +16,7 @@ module TrayApplicationTests =
         SavedSettings: ResizeArray<UserSettings>
         ActivityCount: int ref
         Timestamp: TimeSpan ref
-        CursorPos: (int * int) ref
+        CursorPos: (int * int) option ref
     }
 
     let private createHarness
@@ -29,7 +30,7 @@ module TrayApplicationTests =
         let savedSettings = ResizeArray<UserSettings>()
         let activityCount = ref 0
         let timestamp = ref (TimeSpan.FromSeconds(1.0))
-        let cursorPos = ref (100, 100)
+        let cursorPos = ref (Some(100, 100))
 
         let deps = {
             IsKvmConnected = fun () -> isKvmConnected
@@ -151,7 +152,7 @@ module TrayApplicationTests =
         // Arrange
         let harness = createHarness true true true
         harness.Timestamp.Value <- TimeSpan.FromSeconds(5.0)
-        harness.CursorPos.Value <- (250, 350)
+        harness.CursorPos.Value <- Some(250, 350)
 
         let unpluggedState = { TrayStateLogic.initialState with LastDockState = Some DockState.Unplugged }
         let dockedState = { TrayStateLogic.initialState with LastDockState = Some DockState.SwitchedAway }
@@ -620,7 +621,7 @@ module TrayApplicationTests =
         // Arrange
         let harness = createHarness false false true
         harness.Timestamp.Value <- TimeSpan.FromSeconds(10.0)
-        harness.CursorPos.Value <- (400, 300)
+        harness.CursorPos.Value <- Some(400, 300)
 
         let initialUnplugged = { TrayStateLogic.initialState with LastDockState = Some DockState.Unplugged }
 
@@ -656,7 +657,7 @@ module TrayApplicationTests =
         // Arrange
         let harness = createHarness isKvmConnected true true
         harness.Timestamp.Value <- TimeSpan.FromSeconds(10.0)
-        harness.CursorPos.Value <- (400, 300)
+        harness.CursorPos.Value <- Some(400, 300)
 
         let dockState =
             if isKvmConnected then
@@ -691,7 +692,7 @@ module TrayApplicationTests =
         // Arrange (Step 1: Unplug while tracker had prior timestamp)
         let unpluggedHarness = createHarness false false true
         unpluggedHarness.Timestamp.Value <- TimeSpan.FromSeconds(200.0)
-        unpluggedHarness.CursorPos.Value <- (400, 300)
+        unpluggedHarness.CursorPos.Value <- Some(400, 300)
 
         let priorDockedState = {
             TrayStateLogic.initialState with
@@ -719,7 +720,7 @@ module TrayApplicationTests =
         // Arrange (Step 2: Replug at t = 510s)
         let dockedHarness = createHarness true true true
         dockedHarness.Timestamp.Value <- TimeSpan.FromSeconds(510.0)
-        dockedHarness.CursorPos.Value <- (400, 300)
+        dockedHarness.CursorPos.Value <- Some(400, 300)
 
         // Act (Step 2: Replug initializes fresh 2-minute window instead of triggering immediately)
         let afterReplug =
@@ -742,7 +743,7 @@ module TrayApplicationTests =
         // Arrange
         let harness = createHarness true true true
         harness.Timestamp.Value <- TimeSpan.FromSeconds(10.0)
-        harness.CursorPos.Value <- (400, 300)
+        harness.CursorPos.Value <- Some(400, 300)
 
         let initialActive = { TrayStateLogic.initialState with LastDockState = Some DockState.Active }
 
@@ -752,7 +753,7 @@ module TrayApplicationTests =
 
         // Act (100s elapsed, user moves mouse)
         harness.Timestamp.Value <- TimeSpan.FromSeconds(110.0)
-        harness.CursorPos.Value <- (450, 320)
+        harness.CursorPos.Value <- Some(450, 320)
 
         let afterMove =
             (TrayStateLogic.step harness.Dependencies stateWithKeepAwake (CheckStatus false)).Value
@@ -769,3 +770,89 @@ module TrayApplicationTests =
 
         // Assert (still no activity)
         Assert.That(harness.ActivityCount.Value, Is.EqualTo(0))
+
+    [<Test>]
+    let ``CheckStatus skips cursor activity while workstation is locked and starts fresh timer upon unlock`` () =
+        // Arrange
+        let harness = createHarness true true true
+        harness.Timestamp.Value <- TimeSpan.FromSeconds(10.0)
+        harness.CursorPos.Value <- Some(400, 300)
+
+        let initialActive = { TrayStateLogic.initialState with LastDockState = Some DockState.Active }
+
+        let stateWithKeepAwake =
+            (TrayStateLogic.step harness.Dependencies initialActive (SetKeepScreenAwake KeepScreenAwakeMode.Always))
+                .Value
+
+        // Act (Step 1: Workstation is locked -> GetCursorPosition returns None for 30 minutes)
+        harness.CursorPos.Value <- None
+        harness.Timestamp.Value <- TimeSpan.FromMinutes(10.0)
+
+        let whileLocked1 =
+            (TrayStateLogic.step harness.Dependencies stateWithKeepAwake (CheckStatus false)).Value
+
+        harness.Timestamp.Value <- TimeSpan.FromMinutes(30.0)
+
+        let whileLocked2 =
+            (TrayStateLogic.step harness.Dependencies whileLocked1 (CheckStatus false)).Value
+
+        // Assert (Step 1: zero cursor activity while locked, tracker reset)
+        Assert.That(harness.ActivityCount.Value, Is.EqualTo(0))
+        Assert.That(whileLocked2.CursorIdleTracker, Is.EqualTo(CursorActivity.initialTrackerState))
+
+        // Act (Step 2: User unlocks workstation at t = 31 min -> initializes fresh 2-minute window)
+        harness.CursorPos.Value <- Some(600, 500)
+        harness.Timestamp.Value <- TimeSpan.FromMinutes(31.0)
+
+        let afterUnlock =
+            (TrayStateLogic.step harness.Dependencies whileLocked2 (CheckStatus false)).Value
+
+        Assert.That(harness.ActivityCount.Value, Is.EqualTo(0))
+        Assert.That(afterUnlock.CursorIdleTracker.LastMoveTimestamp, Is.EqualTo(TimeSpan.FromMinutes(31.0)))
+
+        // Act (Step 3: 2 minutes after unlock -> triggers cursor activity)
+        harness.Timestamp.Value <- TimeSpan.FromMinutes(33.0)
+
+        let _ =
+            (TrayStateLogic.step harness.Dependencies afterUnlock (CheckStatus false)).Value
+
+        // Assert (Step 3)
+        Assert.That(harness.ActivityCount.Value, Is.EqualTo(1))
+
+    [<Test>]
+    let ``startAgent does not accumulate backlog when periodic checks take longer than poll interval`` () =
+        // Arrange
+        use firstCheckEntered = new ManualResetEventSlim(false)
+        use allowFirstCheckFinish = new ManualResetEventSlim(false)
+        let checkCount = ref 0
+        let harness = createHarness true true true
+
+        let slowDeps = {
+            harness.Dependencies with
+                IsKvmConnected =
+                    fun () ->
+                        let n = Interlocked.Increment(checkCount)
+
+                        if n = 1 then
+                            firstCheckEntered.Set()
+                            allowFirstCheckFinish.Wait(TimeSpan.FromSeconds(2.0)) |> ignore
+
+                        true
+        }
+
+        // Act
+        let agent =
+            TrayStateLogic.startAgent (TimeSpan.FromMilliseconds(15.0)) slowDeps AppSettings.defaultSettings
+
+        try
+            Assert.That(firstCheckEntered.Wait(TimeSpan.FromSeconds(1.0)), Is.True)
+            // Wait several poll intervals while the first check is blocked in-flight
+            Thread.Sleep(80)
+            let queueDuringSlowCheck = agent.CurrentQueueLength
+            allowFirstCheckFinish.Set()
+
+            // Assert: zero queued periodic messages accumulated while the check was running
+            Assert.That(queueDuringSlowCheck, Is.EqualTo(0))
+        finally
+            allowFirstCheckFinish.Set()
+            agent.Post(StopAgent)

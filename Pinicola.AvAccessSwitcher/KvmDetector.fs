@@ -33,14 +33,23 @@ module KvmDetector =
             Log.Error(ex, "Error querying KVM status via WMI.")
             false
 
+    [<Literal>]
+    let private KvmWqlQuery =
+        @"SELECT DeviceID, Name FROM Win32_PnPEntity WHERE Status = 'OK' AND (DeviceID LIKE '%VID_1D6B&PID_B022%' OR Name LIKE '%AV Access%')"
+
     let private queryWmiDevices () : PnpDeviceInfo seq =
         seq {
+            let options =
+                EnumerationOptions(ReturnImmediately = true, Rewindable = false, Timeout = TimeSpan.FromSeconds(5.0))
+
             use searcher =
-                new ManagementObjectSearcher(@"SELECT DeviceID, Status, Name FROM Win32_PnPEntity WHERE Status = 'OK'")
+                new ManagementObjectSearcher(ManagementScope(), SelectQuery(KvmWqlQuery), options)
 
             use collection = searcher.Get()
 
-            for item in collection |> Seq.cast<ManagementObject> do
+            for rawItem in collection |> Seq.cast<ManagementObject> do
+                use item = rawItem
+
                 let deviceId =
                     match item.["DeviceID"] with
                     | :? string as s -> s

@@ -349,6 +349,7 @@ type TrayApplicationContext() as this =
     let checkNowMenuItem = new ToolStripMenuItem("Check Status Now")
     let forceLaptopMenuItem = new ToolStripMenuItem("Force: Show Only on 1")
     let forceExtendMenuItem = new ToolStripMenuItem("Force: Extend Displays")
+    let openLogsMenuItem = new ToolStripMenuItem("Open Logs")
 
     let versionMenuItem =
         new ToolStripMenuItem($"Version: {AppVersion.formatDisplayVersion versionInfo}")
@@ -472,6 +473,7 @@ type TrayApplicationContext() as this =
         checkNowMenuItem.Click.Add(fun _ -> stateAgent.Post(CheckStatus true))
         forceLaptopMenuItem.Click.Add(fun _ -> stateAgent.Post(ForceLaptop))
         forceExtendMenuItem.Click.Add(fun _ -> stateAgent.Post(ForceExtend))
+        openLogsMenuItem.Click.Add(fun _ -> AppLogging.openLogsDirectory () |> ignore)
         exitMenuItem.Click.Add(fun _ -> this.ExitApp())
 
         contextMenu.Items.Add(statusMenuItem) |> ignore
@@ -482,6 +484,8 @@ type TrayApplicationContext() as this =
         contextMenu.Items.Add(forceLaptopMenuItem) |> ignore
         contextMenu.Items.Add(forceExtendMenuItem) |> ignore
         contextMenu.Items.Add(checkNowMenuItem) |> ignore
+        contextMenu.Items.Add(new ToolStripSeparator()) |> ignore
+        contextMenu.Items.Add(openLogsMenuItem) |> ignore
         contextMenu.Items.Add(new ToolStripSeparator()) |> ignore
         contextMenu.Items.Add(versionMenuItem) |> ignore
         contextMenu.Items.Add(exitMenuItem) |> ignore

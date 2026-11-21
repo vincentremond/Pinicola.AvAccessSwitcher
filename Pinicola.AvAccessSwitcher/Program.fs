@@ -88,31 +88,6 @@ module Program =
                 deps.RunApplication()
                 0
 
-    let private initLogging () =
-        let logDir =
-            Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "Pinicola.AvAccessSwitcher",
-                "logs"
-            )
-
-        Directory.CreateDirectory(logDir) |> ignore
-        let logFilePath = Path.Combine(logDir, "switcher-.log")
-
-        Log.Logger <-
-            LoggerConfiguration()
-                .MinimumLevel.Debug()
-                .WriteTo.File(logFilePath, rollingInterval = RollingInterval.Day, retainedFileCountLimit = Nullable 14)
-                .CreateLogger()
-
-        let versionInfo = AppVersion.current
-
-        Log.Information(
-            "Pinicola.AvAccessSwitcher {Version} starting up. Log file path: {LogPath}",
-            versionInfo.InformationalVersion,
-            logFilePath
-        )
-
     let private notifyAlreadyRunning () =
         try
             let iconPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "icon.png")
@@ -146,7 +121,7 @@ module Program =
     [<STAThread>]
     [<EntryPoint>]
     let main argv =
-        initLogging ()
+        AppLogging.initLogging ()
 
         try
             execute defaultDependencies argv

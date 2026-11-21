@@ -14,6 +14,7 @@
     <Compile Include="KvmDetectorTests.fs" />
     <Compile Include="CursorActivityTests.fs" />
     <Compile Include="AppVersionTests.fs" />
+    <Compile Include="AppLoggingTests.fs" />
     <Compile Include="AppSettingsTests.fs" />
     <Compile Include="TrayApplicationTests.fs" />
     <Compile Include="ProgramTests.fs" />
